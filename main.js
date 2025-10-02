@@ -31,20 +31,26 @@ class LEDConfigurator {
     async loadFont() {
         const loader = document.getElementById('loader');
         const populateBtn = document.getElementById('populateBtn');
-        
+
         try {
             loader.style.display = 'block';
             populateBtn.disabled = true;
-            
-            // Load Roboto Slab font
-            this.font = await opentype.load('https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf');
-            
+
+            // Try to load Roboto Slab font, with fallback to creating simple shapes
+            try {
+                this.font = await opentype.load('https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf');
+            } catch (fontError) {
+                console.warn("External font failed, using fallback:", fontError);
+                // Create a simple fallback font object for basic shapes
+                this.font = this.createFallbackFont();
+            }
+
             loader.style.display = 'none';
             populateBtn.disabled = false;
         } catch (error) {
             console.error("Font loading error:", error);
             loader.style.display = 'none';
-            
+
             const svgContainer = document.getElementById('svgContainer');
             svgContainer.innerHTML = `
                 <div class="text-red-500 flex flex-col items-center">
@@ -53,6 +59,41 @@ class LEDConfigurator {
                 </div>
             `;
         }
+    }
+
+    createFallbackFont() {
+        // Create a minimal font object with basic letter shapes for testing
+        return {
+            getPath: (char, x, y, fontSize) => {
+                const paths = this.getFallbackPaths(char, x, y, fontSize);
+                return {
+                    toPathData: () => paths
+                };
+            },
+            getAdvanceWidth: (char, fontSize) => fontSize * 0.6
+        };
+    }
+
+    getFallbackPaths(char, x, y, fontSize) {
+        const scale = fontSize / 100;
+        const offsetX = x;
+        const offsetY = y;
+
+        // Create simple letter shapes that will definitely have bounding boxes
+        const w = 50 * scale; // width
+        const h = 80 * scale; // height
+
+        // Generic letter shape - filled rectangle with some detail
+        const genericShape = `M ${offsetX} ${offsetY} L ${offsetX + w} ${offsetY} L ${offsetX + w} ${offsetY - h} L ${offsetX} ${offsetY - h} Z M ${offsetX + 10*scale} ${offsetY - 10*scale} L ${offsetX + w - 10*scale} ${offsetY - 10*scale} L ${offsetX + w - 10*scale} ${offsetY - h + 10*scale} L ${offsetX + 10*scale} ${offsetY - h + 10*scale} Z`;
+
+        // Simple shapes for each letter
+        const shapes = {
+            'A': `M ${offsetX} ${offsetY} L ${offsetX + w} ${offsetY} L ${offsetX + w*0.8} ${offsetY - h} L ${offsetX + w*0.2} ${offsetY - h} Z M ${offsetX + w*0.25} ${offsetY - h*0.3} L ${offsetX + w*0.75} ${offsetY - h*0.3} L ${offsetX + w*0.7} ${offsetY - h*0.6} L ${offsetX + w*0.3} ${offsetY - h*0.6} Z`,
+            'B': `M ${offsetX} ${offsetY} L ${offsetX + w*0.8} ${offsetY} L ${offsetX + w*0.8} ${offsetY - h*0.5} L ${offsetX + w*0.8} ${offsetY - h} L ${offsetX} ${offsetY - h} Z M ${offsetX + 10*scale} ${offsetY - 10*scale} L ${offsetX + w*0.7} ${offsetY - 10*scale} L ${offsetX + w*0.7} ${offsetY - h*0.4} L ${offsetX + 10*scale} ${offsetY - h*0.4} Z M ${offsetX + 10*scale} ${offsetY - h*0.6} L ${offsetX + w*0.7} ${offsetY - h*0.6} L ${offsetX + w*0.7} ${offsetY - h + 10*scale} L ${offsetX + 10*scale} ${offsetY - h + 10*scale} Z`,
+            'C': `M ${offsetX} ${offsetY - h*0.2} L ${offsetX + w*0.8} ${offsetY} L ${offsetX + w*0.8} ${offsetY - h*0.2} L ${offsetX + w*0.2} ${offsetY - h*0.2} L ${offsetX + w*0.2} ${offsetY - h*0.8} L ${offsetX + w*0.8} ${offsetY - h*0.8} L ${offsetX + w*0.8} ${offsetY - h} L ${offsetX} ${offsetY - h*0.8} Z M ${offsetX + 10*scale} ${offsetY - h*0.3} L ${offsetX + w*0.7} ${offsetY - h*0.3} L ${offsetX + w*0.7} ${offsetY - h*0.7} L ${offsetX + 10*scale} ${offsetY - h*0.7} Z`
+        };
+
+        return shapes[char.toUpperCase()] || genericShape;
     }
 
     attachEventListeners() {
@@ -288,18 +329,32 @@ class LEDConfigurator {
         }
         
         svg.appendChild(mainGroup);
-        
+
         // Set viewBox
         svgContainer.appendChild(svg);
         const bbox = mainGroup.getBBox();
-        svg.setAttribute("viewBox", 
+        svg.setAttribute("viewBox",
             `${bbox.x - 20} ${bbox.y - 20} ${bbox.width + 40} ${bbox.height + 40}`);
-        
+
+        // Now that all characters are in the DOM, place LEDs
+        const ledColor = document.getElementById('ledColor').value;
+        document.querySelectorAll('.character-group').forEach(charGroup => {
+            const outlinePath = charGroup.querySelector('.letter-outline');
+            if (outlinePath) {
+                console.log('Placing LEDs for character, bbox now:', outlinePath.getBBox());
+                this.ledPlacer.placeLEDsInside(outlinePath, charGroup, ledCount, {
+                    color: ledColor,
+                    brightness: 100,
+                    effect: 'none'
+                });
+            }
+        });
+
         loader.style.display = 'none';
-        
+
         // Calculate results
         this.calculateResults();
-        
+
         // Attach interaction listeners
         this.attachInteractionListeners();
     }
@@ -313,48 +368,26 @@ class LEDConfigurator {
         // Get path from font
         const path = this.font.getPath(char, xOffset, fontSize * 0.8, fontSize);
         const pathData = path.toPathData(2);
-        
+
+        console.log('Character:', char, 'Path data:', pathData);
+
         // Create outline path
         const pathElement = document.createElementNS(svgNS, "path");
         pathElement.setAttribute("d", pathData);
         pathElement.setAttribute("class", "letter-outline");
         pathElement.setAttribute("stroke", document.getElementById('strokeColor').value);
         pathElement.setAttribute("stroke-width", document.getElementById('strokeWidth').value);
+        pathElement.setAttribute("fill", "none");
         charGroup.appendChild(pathElement);
-        
+
         // Add white fill for letter body
         const fillPath = document.createElementNS(svgNS, "path");
         fillPath.setAttribute("d", pathData);
         fillPath.setAttribute("class", "letter-fill");
         fillPath.setAttribute("fill", "white");
+        fillPath.setAttribute("stroke", "none");
         charGroup.appendChild(fillPath);
-        
-        // Place LEDs inside the letter
-        const ledColor = document.getElementById('ledColor').value;
-        this.ledPlacer.placeLEDsInside(pathElement, charGroup, ledCount, {
-            color: ledColor,
-            brightness: 100,
-            effect: 'none'
-        });
-        
-        // Add measurement annotation if height is shown
-        const heightInput = document.getElementById('height');
-        if (heightInput) {
-            const bbox = pathElement.getBBox();
-            const text = document.createElementNS(svgNS, "text");
-            text.setAttribute("x", bbox.x + bbox.width / 2);
-            text.setAttribute("y", bbox.y + bbox.height + 20);
-            text.setAttribute("text-anchor", "middle");
-            text.setAttribute("font-size", "12");
-            text.setAttribute("fill", "#999");
-            text.textContent = char === 'S' ? '5' : 
-                               char === 'A' ? '6' : 
-                               char === 'N' ? '5' : 
-                               char === 'J' ? '4' : 
-                               char === 'Y' ? '6' : '6';
-            charGroup.appendChild(text);
-        }
-        
+
         return charGroup;
     }
 

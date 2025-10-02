@@ -2,7 +2,7 @@
 
 class LEDPlacer {
     constructor() {
-        this.ledSize = 8; // Size of LED modules
+        this.ledSize = 12; // Size of LED modules (increased for better visibility)
         this.ledSpacing = 0.75; // Spacing factor between LEDs
     }
 
@@ -20,29 +20,47 @@ class LEDPlacer {
             effect = 'none'
         } = options;
 
-        if (!pathElement || ledCount <= 0) return;
+        console.log('placeLEDsInside called with:', { pathElement, charGroup, ledCount, options });
 
-        // Get the path data and create an offset path for inner placement
+        if (!pathElement || ledCount <= 0) {
+            console.log('Early return - invalid parameters');
+            return;
+        }
+
+        // Determine a reference filled path to test inside/outside
+        const fillPath = charGroup.querySelector('.letter-fill') || pathElement;
+
+        // Calculate offset distance so LEDs sit between the double lines (stroke band)
         const bbox = pathElement.getBBox();
-        const pathLength = pathElement.getTotalLength();
-        
-        // Calculate offset distance based on letter size
-        const offsetDistance = Math.min(bbox.width, bbox.height) * 0.08; // 8% inset
-        
-        // Create LEDs along the path but offset inward
-        const leds = this.createInnerLEDs(pathElement, ledCount, offsetDistance);
-        
+        console.log('Letter bbox:', bbox);
+
+        const strokeFromPath = parseFloat(pathElement.getAttribute('stroke-width') || '0');
+        const halfStroke = isNaN(strokeFromPath) ? 0 : strokeFromPath / 2;
+        // Center the LED body in the stroke band with an extra padding so the rect doesn't touch borders
+        const paddingFromLed = this.ledSize * 0.6;
+        const baseInset = halfStroke + paddingFromLed;
+        const minInset = Math.min(bbox.width, bbox.height) * 0.04; // keep some inset on very thin strokes
+        const offsetDistance = Math.max(baseInset, minInset);
+
+        // Place LEDs along the stroke path like in the example
+        const leds = this.createStrokePathLEDs(pathElement, ledCount, offsetDistance);
+
+        console.log('Created LEDs:', leds);
+
         // Add LEDs to the character group
         leds.forEach((ledData, index) => {
             const led = this.createLEDElement(ledData, color, brightness, effect, index);
+            console.log('Adding LED element:', led);
             charGroup.appendChild(led);
         });
+
+        console.log('Final charGroup children:', charGroup.children.length);
     }
 
     /**
      * Create LED positions along the inner path
      */
-    createInnerLEDs(pathElement, ledCount, offsetDistance) {
+    createInnerLEDs(pathElement, fillPath, ledCount, offsetDistance) {
         const pathLength = pathElement.getTotalLength();
         const leds = [];
         
@@ -57,16 +75,116 @@ class LEDPlacer {
             // Calculate the normal vector (perpendicular to the path)
             const normal = this.calculateNormal(pathElement, distance);
             
-            // Offset the LED position inward
+            // Choose a normal direction that points into the filled region.
+            // Test a candidate point using isPointInFill when available.
+            let nx = -normal.x;
+            let ny = -normal.y;
+
+            const testPoint = (tx, ty) => {
+                if (typeof fillPath.isPointInFill === 'function') {
+                    const svg = fillPath.ownerSVGElement;
+                    // Create an SVGPoint to test
+                    const p = svg.createSVGPoint();
+                    p.x = tx;
+                    p.y = ty;
+                    return fillPath.isPointInFill(p);
+                }
+                // Fallback: assume negative normal points inward
+                return true;
+            };
+
+            // If the first offset isn't inside, flip the normal direction
+            let candidateX = point.x + nx * offsetDistance;
+            let candidateY = point.y + ny * offsetDistance;
+            if (!testPoint(candidateX, candidateY)) {
+                nx = -nx;
+                ny = -ny;
+                candidateX = point.x + nx * offsetDistance;
+                candidateY = point.y + ny * offsetDistance;
+            }
+
+            // If still not inside (thin strokes/cusps), step further inward a bit
+            let attempts = 0;
+            const step = this.ledSize * 0.4;
+            while (!testPoint(candidateX, candidateY) && attempts < 4) {
+                attempts++;
+                candidateX = point.x + nx * (offsetDistance + step * attempts);
+                candidateY = point.y + ny * (offsetDistance + step * attempts);
+            }
+
             const ledPosition = {
-                x: point.x - normal.x * offsetDistance,
-                y: point.y - normal.y * offsetDistance,
-                angle: Math.atan2(normal.y, normal.x) * (180 / Math.PI) + 90
+                x: candidateX,
+                y: candidateY,
+                angle: Math.atan2(ny, nx) * (180 / Math.PI)
             };
             
             leds.push(ledPosition);
         }
         
+        return leds;
+    }
+
+    /**
+     * Place LEDs along the stroke path, following the letter outline like in the example
+     */
+    createStrokePathLEDs(pathElement, ledCount, offsetDistance) {
+        const leds = [];
+
+        if (!pathElement || ledCount <= 0) {
+            console.log('Invalid path or LED count');
+            return leds;
+        }
+
+        try {
+            const pathLength = pathElement.getTotalLength();
+            console.log('Path length:', pathLength, 'LEDs to place:', ledCount);
+
+            if (pathLength <= 0) {
+                console.log('Path has no length');
+                return leds;
+            }
+
+            // Calculate spacing between LEDs along the path
+            const spacing = pathLength / ledCount;
+            console.log('LED spacing along path:', spacing);
+
+            // Place LEDs evenly along the path with slight inward offset
+            for (let i = 0; i < ledCount; i++) {
+                // Position along the path (offset slightly to avoid clustering at start)
+                const distance = (i + 0.5) * spacing;
+
+                try {
+                    const point = pathElement.getPointAtLength(distance);
+
+                    // Calculate normal vector pointing inward
+                    const normal = this.calculateNormal(pathElement, distance);
+
+                    // Offset slightly inward from the stroke
+                    const inwardOffset = Math.min(offsetDistance, this.ledSize * 0.8);
+                    const ledX = point.x - normal.x * inwardOffset;
+                    const ledY = point.y - normal.y * inwardOffset;
+
+                    // Calculate rotation angle to align with path direction
+                    const angle = Math.atan2(normal.y, normal.x) * (180 / Math.PI);
+
+                    leds.push({
+                        x: ledX,
+                        y: ledY,
+                        angle: angle
+                    });
+
+                    console.log(`LED ${i + 1}: (${ledX.toFixed(1)}, ${ledY.toFixed(1)}) angle: ${angle.toFixed(1)}°`);
+
+                } catch (pointError) {
+                    console.warn('Error getting point at distance', distance, pointError);
+                }
+            }
+
+        } catch (error) {
+            console.error('Error in createStrokePathLEDs:', error);
+        }
+
+        console.log('Total LEDs created:', leds.length);
         return leds;
     }
 
@@ -103,34 +221,35 @@ class LEDPlacer {
      * Create an LED SVG element
      */
     createLEDElement(ledData, color, brightness, effect, index) {
-        const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-        
-        rect.setAttribute("x", ledData.x - this.ledSize / 2);
-        rect.setAttribute("y", ledData.y - this.ledSize / 2);
-        rect.setAttribute("width", this.ledSize);
-        rect.setAttribute("height", this.ledSize * 0.6); // Rectangular LEDs
-        rect.setAttribute("rx", 1); // Slight rounding
-        rect.setAttribute("class", "led-strip");
-        rect.setAttribute("transform", `rotate(${ledData.angle}, ${ledData.x}, ${ledData.y})`);
-        
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+
+        circle.setAttribute("cx", ledData.x);
+        circle.setAttribute("cy", ledData.y);
+        circle.setAttribute("r", this.ledSize / 2);
+        circle.setAttribute("class", "led-strip");
+
         // Store LED properties as data attributes
-        rect.setAttribute("data-color", color);
-        rect.setAttribute("data-brightness", brightness);
-        rect.setAttribute("data-effect", effect);
-        rect.setAttribute("data-index", index);
-        
-        // Apply initial styling
-        rect.style.fill = color;
-        rect.style.opacity = brightness / 100;
-        
+        circle.setAttribute("data-color", color);
+        circle.setAttribute("data-brightness", brightness);
+        circle.setAttribute("data-effect", effect);
+        circle.setAttribute("data-index", index);
+
+        // Apply initial styling with border for visibility
+        circle.style.fill = color;
+        circle.style.stroke = "#333";
+        circle.style.strokeWidth = "1";
+        circle.style.opacity = brightness / 100;
+
         if (effect !== 'none') {
-            rect.classList.add(`led-effect-${effect}`);
+            circle.classList.add(`led-effect-${effect}`);
             if (effect === 'chase') {
-                rect.style.animationDelay = `${index * 0.1}s`;
+                circle.style.animationDelay = `${index * 0.1}s`;
             }
         }
-        
-        return rect;
+
+        console.log(`Created LED element at (${ledData.x}, ${ledData.y}) with color ${color}`);
+
+        return circle;
     }
 
     /**
