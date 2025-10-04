@@ -41,6 +41,13 @@
                             <option value="en">English</option>
                             <option value="es">Español</option>
                             <option value="fr">Français</option>
+                            <option value="hi">हिन्दी (Hindi)</option>
+                            <option value="kn">ಕನ್ನಡ (Kannada)</option>
+                            <option value="ta">தமிழ் (Tamil)</option>
+                            <option value="te">తెలుగు (Telugu)</option>
+                            <option value="bn">বাংলা (Bengali)</option>
+                            <option value="or">ଓଡ଼ିଆ (Odia)</option>
+                            <option value="ml">മലയാളം (Malayalam)</option>
                         </select>
                     </div>
                 </div>
@@ -95,15 +102,17 @@
 
                 <!-- Text Input -->
                 <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-                    <label for="yourText" class="block text-sm font-medium mb-2">Your Text</label>
+                    <label for="yourText" class="block text-sm font-medium mb-2">Your Text (use Enter for new line, max 2 lines)</label>
                     <div class="flex space-x-3">
-                        <input type="text" id="yourText" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500" placeholder="Enter your text here..." value="sanjay">
-                        <button id="populateBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
-                            <i class="fas fa-play mr-1"></i> Populate
-                        </button>
-                        <button id="clearBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
-                            <i class="fas fa-trash-alt mr-1"></i> Clear
-                        </button>
+                        <textarea id="yourText" rows="2" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 resize-none" placeholder="Enter your text here...&#10;Second line (optional)">sanjay</textarea>
+                        <div class="flex flex-col space-y-2">
+                            <button id="populateBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                                <i class="fas fa-play mr-1"></i> Populate
+                            </button>
+                            <button id="clearBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
+                                <i class="fas fa-trash-alt mr-1"></i> Clear
+                            </button>
+                        </div>
                     </div>
                 </div>
 

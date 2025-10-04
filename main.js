@@ -28,7 +28,7 @@ class LEDConfigurator {
         this.setupInitialState();
     }
 
-    async loadFont() {
+    async loadFont(languageCode = 'en') {
         const loader = document.getElementById('loader');
         const populateBtn = document.getElementById('populateBtn');
 
@@ -36,9 +36,26 @@ class LEDConfigurator {
             loader.style.display = 'block';
             populateBtn.disabled = true;
 
-            // Try to load Roboto Slab font, with fallback to creating simple shapes
+            // Font mapping for different languages
+            const fontUrls = {
+                'en': 'https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf',
+                'es': 'https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf',
+                'fr': 'https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf',
+                'hi': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf',
+                'kn': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskannada/NotoSansKannada%5Bwdth%2Cwght%5D.ttf',
+                'ta': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosanstamil/NotoSansTamil%5Bwdth%2Cwght%5D.ttf',
+                'te': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosanstelugu/NotoSansTelugu%5Bwdth%2Cwght%5D.ttf',
+                'bn': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansbengali/NotoSansBengali%5Bwdth%2Cwght%5D.ttf',
+                'or': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansoriya/NotoSansOriya%5Bwdth%2Cwght%5D.ttf',
+                'ml': 'https://raw.githubusercontent.com/google/fonts/main/ofl/notosansmalayalam/NotoSansMalayalam%5Bwdth%2Cwght%5D.ttf'
+            };
+
+            const fontUrl = fontUrls[languageCode] || fontUrls['en'];
+
+            // Try to load the selected font
             try {
-                this.font = await opentype.load('https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf');
+                this.font = await opentype.load(fontUrl);
+                this.currentLanguage = languageCode;
             } catch (fontError) {
                 console.warn("External font failed, using fallback:", fontError);
                 // Create a simple fallback font object for basic shapes
@@ -112,8 +129,12 @@ class LEDConfigurator {
         }
         
         if (yourText) {
-            yourText.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') this.renderText();
+            yourText.addEventListener('keydown', (e) => {
+                // Limit to 2 lines
+                const lines = yourText.value.split('\n');
+                if (e.key === 'Enter' && lines.length >= 2) {
+                    e.preventDefault();
+                }
             });
         }
 
@@ -135,7 +156,19 @@ class LEDConfigurator {
         if (unitToggle) {
             unitToggle.addEventListener('change', () => this.updateUnits());
         }
-        
+
+        // Language selector
+        const languageSelect = document.getElementById('language');
+        if (languageSelect) {
+            languageSelect.addEventListener('change', async (e) => {
+                await this.loadFont(e.target.value);
+                // Re-render text if any exists
+                if (this.state.currentText) {
+                    this.renderText();
+                }
+            });
+        }
+
         // Tab switching
         this.attachTabListeners();
         
@@ -290,47 +323,66 @@ class LEDConfigurator {
     async renderText() {
         const textInput = document.getElementById('yourText');
         const text = textInput.value.trim();
-        
+
         if (!text || !this.font) return;
-        
+
         const loader = document.getElementById('loader');
         loader.style.display = 'block';
-        
+
         this.state.currentText = text;
-        
+
         // Clear and setup SVG
         const svgContainer = document.getElementById('svgContainer');
         svgContainer.innerHTML = '';
-        
+
         const svgNS = "http://www.w3.org/2000/svg";
         const svg = document.createElementNS(svgNS, "svg");
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-        
+
         const mainGroup = document.createElementNS(svgNS, "g");
         mainGroup.setAttribute("id", "mainGroup");
-        mainGroup.setAttribute("transform", 
+        mainGroup.setAttribute("transform",
             `translate(0, ${this.state.translateY}) rotate(${this.state.rotation}) scale(${this.state.scale})`);
-        
-        // Render each character
-        let xOffset = 20;
+
+        // Split text into lines (max 2 lines)
+        const lines = text.split('\n').slice(0, 2);
         const fontSize = CONFIG_DATA.defaults.fontSize;
+        const lineSpacing = CONFIG_DATA.defaults.lineSpacing;
         const ledCount = parseInt(document.getElementById('ledCount').value);
-        
-        for (const char of text) {
-            if (char === ' ') {
-                xOffset += fontSize * 0.5;
-                continue;
+
+        // Render each line
+        let yOffset = 20;
+
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            const line = lines[lineIndex];
+            let xOffset = 20;
+
+            // Create a group for this line
+            const lineGroup = document.createElementNS(svgNS, "g");
+            lineGroup.setAttribute("class", "line-group");
+            lineGroup.setAttribute("data-line", lineIndex);
+
+            for (const char of line) {
+                if (char === ' ') {
+                    xOffset += fontSize * 0.5;
+                    continue;
+                }
+
+                const charGroup = this.createCharacterGroup(char, xOffset, fontSize + yOffset, ledCount);
+                if (charGroup) {
+                    lineGroup.appendChild(charGroup);
+
+                    // Get advance width for next character
+                    const path = this.font.getPath(char, 0, 0, fontSize);
+                    const advanceWidth = this.font.getAdvanceWidth(char, fontSize);
+                    xOffset += advanceWidth + CONFIG_DATA.defaults.letterSpacing;
+                }
             }
 
-            const charGroup = this.createCharacterGroup(char, xOffset, fontSize, ledCount);
-            if (charGroup) {
-                mainGroup.appendChild(charGroup);
-                
-                // Get advance width for next character
-                const path = this.font.getPath(char, 0, 0, fontSize);
-                const advanceWidth = this.font.getAdvanceWidth(char, fontSize);
-                xOffset += advanceWidth + CONFIG_DATA.defaults.letterSpacing;
-            }
+            mainGroup.appendChild(lineGroup);
+
+            // Move to next line
+            yOffset += fontSize + lineSpacing;
         }
         
         svg.appendChild(mainGroup);
@@ -616,11 +668,9 @@ class LEDConfigurator {
         // Update the LED count display below the character
         this.updateCharacterLEDCountDisplay(char, newLedCount);
 
-        // Update total LED count (with timeout to prevent blocking)
-        setTimeout(() => {
-            this.updateTotalLEDCount();
-            this.calculateResults();
-        }, 50);
+        // Update total LED count and recalculate results immediately
+        this.updateTotalLEDCount();
+        this.calculateResults();
 
         console.log('Finished applyCharacterLEDCount');
     }
@@ -657,7 +707,7 @@ class LEDConfigurator {
         const defaultLedCount = parseInt(document.getElementById('ledCount').value) || 5;
 
         for (const char of this.state.currentText) {
-            if (char !== ' ') {
+            if (char !== ' ' && char !== '\n') {
                 const charLedCount = this.state.ledCountPerChar[char] || defaultLedCount;
                 totalCount += charLedCount;
                 console.log(`Character '${char}': ${charLedCount} LEDs`);
@@ -858,23 +908,26 @@ class LEDConfigurator {
     calculateResults() {
         const resultsPanel = document.getElementById('resultsPanel');
         if (!resultsPanel) return;
-        
+
         resultsPanel.classList.remove('hidden');
-        
+
         const text = this.state.currentText;
         const selectedModule = CONFIG_DATA.modules[document.getElementById('module').value];
         const selectedPowerSupply = CONFIG_DATA.powerSupplies[document.getElementById('powerSupply').value];
         const letterHeightInches = parseFloat(document.getElementById('height').value);
         const letterHeightFeet = letterHeightInches / 12;
-        const ledCount = parseInt(document.getElementById('ledCount').value);
-        
+        const defaultLedCount = parseInt(document.getElementById('ledCount').value);
+
         let totalModules = 0;
         let totalPerimeter = 0;
-        
+
+        // Process all characters including newlines
         for (const char of text) {
-            if (char === ' ' || !CONFIG_DATA.characterData[char]) continue;
+            if (char === ' ' || char === '\n' || !CONFIG_DATA.characterData[char]) continue;
             const charData = CONFIG_DATA.characterData[char];
-            totalModules += ledCount;
+            // Use per-character LED count if available, otherwise use default
+            const charLedCount = this.state.ledCountPerChar[char] || defaultLedCount;
+            totalModules += charLedCount;
             totalPerimeter += charData.perimeter * letterHeightFeet;
         }
         

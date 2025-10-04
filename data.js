@@ -105,7 +105,8 @@ const CONFIG_DATA = {
         ledColor: '#666666',
         ledBrightness: 100,
         fontSize: 150,
-        letterSpacing: 20
+        letterSpacing: 20,
+        lineSpacing: 50  // Spacing between lines in pixels
     }
 };
 
