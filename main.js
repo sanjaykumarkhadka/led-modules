@@ -101,6 +101,7 @@ class LEDConfigurator {
         const populateBtn = document.getElementById('populateBtn');
         const clearBtn = document.getElementById('clearBtn');
         const yourText = document.getElementById('yourText');
+        const pdfBtn = document.getElementById('pdfBtn');
         
         if (populateBtn) {
             populateBtn.addEventListener('click', () => this.renderText());
@@ -114,6 +115,10 @@ class LEDConfigurator {
             yourText.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') this.renderText();
             });
+        }
+
+        if (pdfBtn) {
+            pdfBtn.addEventListener('click', () => this.generatePDF());
         }
         
         // Toolbar controls
@@ -1010,6 +1015,126 @@ class LEDConfigurator {
     stopDragging() {
         this.state.isDragging = false;
         this.state.currentElement = null;
+    }
+
+    generatePDF() {
+        if (!this.state.currentText) {
+            alert('Please populate text first before generating PDF');
+            return;
+        }
+
+        // Get current date and time for filename
+        const now = new Date();
+        const dateStr = `${now.getMonth() + 1}-${String(now.getDate()).padStart(2, '0')}-${now.getFullYear()}`;
+        const timeStr = `${String(now.getHours()).padStart(2, '0')} ${String(now.getMinutes()).padStart(2, '0')}`;
+        const filename = `Channel Letter ${dateStr} ${timeStr}.pdf`;
+
+        // Import jsPDF (we'll need to add this library to the HTML)
+        if (typeof window.jspdf === 'undefined') {
+            alert('PDF library not loaded. Please add jsPDF library to the page.');
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        // Add Qwatt Technologies header
+        doc.setFontSize(20);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Qwatt Technologies', 148, 15, { align: 'center' });
+
+        // Add date/time
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`Generated: ${dateStr} ${timeStr}`, 148, 22, { align: 'center' });
+
+        // Add title
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Channel Letter Configuration', 148, 32, { align: 'center' });
+
+        // Get SVG element
+        const svg = document.querySelector('#svgContainer svg');
+        if (svg) {
+            // Convert SVG to canvas then to image
+            const svgData = new XMLSerializer().serializeToString(svg);
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+
+                const imgData = canvas.toDataURL('image/png');
+
+                // Add SVG image to PDF
+                const imgWidth = 250;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                doc.addImage(imgData, 'PNG', 23, 40, imgWidth, Math.min(imgHeight, 100));
+
+                // Add specifications table
+                const startY = 40 + Math.min(imgHeight, 100) + 10;
+                doc.setFontSize(14);
+                doc.setFont('helvetica', 'bold');
+                doc.text('Specifications', 20, startY);
+
+                doc.setFontSize(10);
+                doc.setFont('helvetica', 'normal');
+
+                const specs = [
+                    ['Text:', this.state.currentText],
+                    ['Height:', document.getElementById('height')?.value + ' inches'],
+                    ['Total LED Modules:', document.getElementById('modulesCount')?.textContent || '0'],
+                    ['Power Required:', document.getElementById('powerRequired')?.textContent || '0 W'],
+                    ['Power Supplies Needed:', document.getElementById('powerSuppliesCount')?.textContent || '0']
+                ];
+
+                let yPos = startY + 8;
+                specs.forEach(([label, value]) => {
+                    doc.setFont('helvetica', 'bold');
+                    doc.text(label, 20, yPos);
+                    doc.setFont('helvetica', 'normal');
+                    doc.text(value, 70, yPos);
+                    yPos += 7;
+                });
+
+                // Add LED count per character
+                yPos += 5;
+                doc.setFontSize(12);
+                doc.setFont('helvetica', 'bold');
+                doc.text('LED Count per Character:', 20, yPos);
+                yPos += 7;
+
+                doc.setFontSize(10);
+                doc.setFont('helvetica', 'normal');
+                for (const char of this.state.currentText) {
+                    if (char !== ' ') {
+                        const ledCount = this.state.ledCountPerChar[char] || parseInt(document.getElementById('ledCount').value);
+                        doc.text(`${char}: ${ledCount} LEDs`, 25, yPos);
+                        yPos += 6;
+                    }
+                }
+
+                // Save PDF
+                doc.save(filename);
+            };
+
+            img.onerror = () => {
+                alert('Error generating PDF. SVG conversion failed.');
+            };
+
+            img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+        } else {
+            alert('No SVG to export. Please populate text first.');
+        }
     }
 }
 
