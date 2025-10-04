@@ -17,6 +17,29 @@ body {
     stroke-width: 4;
 }
 
+/* Character Selection Styles */
+.letter-outline {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.letter-outline:hover {
+    stroke: #3b82f6 !important;
+    stroke-width: 3 !important;
+}
+
+.letter-outline.selected {
+    stroke: #ef4444 !important;
+    stroke-width: 4 !important;
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
+}
+
+/* Character LED Control Panel */
+.character-led-control-panel {
+    display: none;
+    font-family: 'Inter', sans-serif;
+}
+
 .led-path.stroke-solid {
     stroke-dasharray: none;
 }

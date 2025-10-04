@@ -93,7 +93,7 @@ class LEDConfigurator {
             'C': `M ${offsetX} ${offsetY - h*0.2} L ${offsetX + w*0.8} ${offsetY} L ${offsetX + w*0.8} ${offsetY - h*0.2} L ${offsetX + w*0.2} ${offsetY - h*0.2} L ${offsetX + w*0.2} ${offsetY - h*0.8} L ${offsetX + w*0.8} ${offsetY - h*0.8} L ${offsetX + w*0.8} ${offsetY - h} L ${offsetX} ${offsetY - h*0.8} Z M ${offsetX + 10*scale} ${offsetY - h*0.3} L ${offsetX + w*0.7} ${offsetY - h*0.3} L ${offsetX + w*0.7} ${offsetY - h*0.7} L ${offsetX + 10*scale} ${offsetY - h*0.7} Z`
         };
 
-        return shapes[char.toUpperCase()] || genericShape;
+        return shapes[char.toUpperCase()] || shapes[char] || genericShape;
     }
 
     attachEventListeners() {
@@ -311,12 +311,12 @@ class LEDConfigurator {
         const fontSize = CONFIG_DATA.defaults.fontSize;
         const ledCount = parseInt(document.getElementById('ledCount').value);
         
-        for (const char of text.toUpperCase()) {
+        for (const char of text) {
             if (char === ' ') {
                 xOffset += fontSize * 0.5;
                 continue;
             }
-            
+
             const charGroup = this.createCharacterGroup(char, xOffset, fontSize, ledCount);
             if (charGroup) {
                 mainGroup.appendChild(charGroup);
@@ -333,22 +333,39 @@ class LEDConfigurator {
         // Set viewBox
         svgContainer.appendChild(svg);
         const bbox = mainGroup.getBBox();
+
+        // Add height measurement annotation on the left side (before final bbox calculation)
+        this.addHeightMeasurement(mainGroup, bbox);
+
+        // Recalculate bbox to include measurement
+        const finalBbox = mainGroup.getBBox();
         svg.setAttribute("viewBox",
-            `${bbox.x - 20} ${bbox.y - 20} ${bbox.width + 40} ${bbox.height + 40}`);
+            `${finalBbox.x - 20} ${finalBbox.y - 20} ${finalBbox.width + 40} ${finalBbox.height + 60}`);
 
         // Now that all characters are in the DOM, place LEDs
         const ledColor = document.getElementById('ledColor').value;
         document.querySelectorAll('.character-group').forEach(charGroup => {
             const outlinePath = charGroup.querySelector('.letter-outline');
-            if (outlinePath) {
-                console.log('Placing LEDs for character, bbox now:', outlinePath.getBBox());
-                this.ledPlacer.placeLEDsInside(outlinePath, charGroup, ledCount, {
+            const char = charGroup.getAttribute('data-char');
+
+            if (outlinePath && char) {
+                // Get LED count for this specific character (default to global count)
+                const charLedCount = this.state.ledCountPerChar[char] || ledCount;
+
+                console.log(`Placing ${charLedCount} LEDs for character '${char}', bbox:`, outlinePath.getBBox());
+                this.ledPlacer.placeLEDsInside(outlinePath, charGroup, charLedCount, {
                     color: ledColor,
                     brightness: 100,
                     effect: 'none'
                 });
+
+                // Add LED count display below each character
+                this.addCharacterLEDCountDisplay(charGroup, char, charLedCount);
             }
         });
+
+        // Update total LED count
+        this.updateTotalLEDCount();
 
         loader.style.display = 'none';
 
@@ -411,20 +428,342 @@ class LEDConfigurator {
     }
 
     selectCharacter(charGroup) {
+        // Close any existing popup first
+        this.hideCharacterLEDControls();
+
         // Deselect previous
         if (this.state.selectedCharGroup) {
             const prevOutline = this.state.selectedCharGroup.querySelector('.letter-outline');
             if (prevOutline) prevOutline.classList.remove('selected');
         }
-        
-        // Hide LED control panel
-        const ledControlPanel = document.querySelector('.led-control-panel');
-        if (ledControlPanel) ledControlPanel.classList.remove('active');
-        
+
         // Select new
         this.state.selectedCharGroup = charGroup;
         const outline = charGroup.querySelector('.letter-outline');
         if (outline) outline.classList.add('selected');
+
+        // Show character-specific LED controls
+        this.showCharacterLEDControls(charGroup);
+    }
+
+    showCharacterLEDControls(charGroup) {
+        const char = charGroup.getAttribute('data-char');
+        const currentLedCount = this.state.ledCountPerChar[char] || parseInt(document.getElementById('ledCount').value);
+
+        // Remove any existing panel first
+        const existingPanel = document.getElementById('characterLEDControl');
+        if (existingPanel) {
+            existingPanel.remove();
+        }
+
+        // Create new character LED control panel
+        const charControlPanel = document.createElement('div');
+        charControlPanel.id = 'characterLEDControl';
+        charControlPanel.className = 'character-led-control-panel';
+        charControlPanel.innerHTML = `
+                <div class="bg-white p-4 rounded-lg shadow-lg border-2 border-blue-500">
+                    <h3 class="text-lg font-semibold mb-3">Letter '<span id="selectedChar"></span>' LED Control</h3>
+                    <div class="flex items-center space-x-3 mb-3">
+                        <label class="text-sm font-medium">LED Count:</label>
+                        <button id="decreaseCharLeds" class="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-100">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" id="charLedCount" value="${currentLedCount}" min="1" max="20" class="w-16 text-center border border-gray-300 rounded px-2 py-1">
+                        <button id="increaseCharLeds" class="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-100">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="applyCharLeds" class="px-4 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600">Apply</button>
+                        <button id="closeCharControl" class="px-4 py-2 bg-gray-500 text-white text-sm rounded hover:bg-gray-600">Close</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(charControlPanel);
+
+        // Add event listeners with proper binding
+        const decreaseBtn = charControlPanel.querySelector('#decreaseCharLeds');
+        const increaseBtn = charControlPanel.querySelector('#increaseCharLeds');
+        const applyBtn = charControlPanel.querySelector('#applyCharLeds');
+        const closeBtn = charControlPanel.querySelector('#closeCharControl');
+
+        decreaseBtn.onclick = () => {
+            const input = charControlPanel.querySelector('#charLedCount');
+            if (parseInt(input.value) > 1) {
+                input.value = parseInt(input.value) - 1;
+            }
+        };
+
+        increaseBtn.onclick = () => {
+            const input = charControlPanel.querySelector('#charLedCount');
+            if (parseInt(input.value) < 20) {
+                input.value = parseInt(input.value) + 1;
+            }
+        };
+
+        applyBtn.onclick = () => {
+            // Disable button to prevent multiple clicks
+            applyBtn.disabled = true;
+            applyBtn.textContent = 'Applying...';
+
+            setTimeout(() => {
+                try {
+                    this.applyCharacterLEDCount();
+                } catch (error) {
+                    console.error('Error in applyCharacterLEDCount:', error);
+                } finally {
+                    // Re-enable button
+                    applyBtn.disabled = false;
+                    applyBtn.textContent = 'Apply';
+                }
+            }, 100);
+        };
+
+        closeBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Close button clicked - force closing');
+
+            // Force close - remove panel immediately
+            if (charControlPanel && charControlPanel.parentNode) {
+                charControlPanel.parentNode.removeChild(charControlPanel);
+                console.log('Panel force removed');
+            }
+
+            // Clear selection
+            if (this.state.selectedCharGroup) {
+                const outline = this.state.selectedCharGroup.querySelector('.letter-outline');
+                if (outline) outline.classList.remove('selected');
+                this.state.selectedCharGroup = null;
+                console.log('Character force deselected');
+            }
+        };
+
+        // Update panel content
+        charControlPanel.querySelector('#selectedChar').textContent = char;
+        charControlPanel.querySelector('#charLedCount').value = currentLedCount;
+
+        // Position panel next to selected character
+        const rect = charGroup.getBoundingClientRect();
+        charControlPanel.style.position = 'fixed';
+        charControlPanel.style.left = (rect.right + 10) + 'px';
+        charControlPanel.style.top = rect.top + 'px';
+        charControlPanel.style.zIndex = '1000';
+        charControlPanel.style.display = 'block';
+
+        // Add escape key to close
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape') {
+                this.hideCharacterLEDControls();
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+    }
+
+    applyCharacterLEDCount() {
+        console.log('Starting applyCharacterLEDCount');
+
+        if (!this.state.selectedCharGroup) {
+            console.warn('No character selected');
+            return;
+        }
+
+        const char = this.state.selectedCharGroup.getAttribute('data-char');
+        const charLedCountInput = document.querySelector('#characterLEDControl #charLedCount');
+
+        if (!charLedCountInput) {
+            console.warn('LED count input not found');
+            return;
+        }
+
+        const newLedCount = parseInt(charLedCountInput.value);
+
+        if (!char || isNaN(newLedCount) || newLedCount < 1 || newLedCount > 20) {
+            console.warn('Invalid character or LED count:', { char, newLedCount });
+            return;
+        }
+
+        console.log(`Applying ${newLedCount} LEDs to character '${char}'`);
+
+        // Store the new LED count for this character
+        this.state.ledCountPerChar[char] = newLedCount;
+
+        // Remove existing LEDs for this character
+        const existingLeds = this.state.selectedCharGroup.querySelectorAll('.led-strip');
+        console.log(`Removing ${existingLeds.length} existing LEDs`);
+        existingLeds.forEach(led => led.remove());
+
+        // Recreate LEDs with new count
+        const outlinePath = this.state.selectedCharGroup.querySelector('.letter-outline');
+        const ledColor = '#888888'; // Fixed color like in example
+
+        if (outlinePath) {
+            this.ledPlacer.placeLEDsInside(outlinePath, this.state.selectedCharGroup, newLedCount, {
+                color: ledColor,
+                brightness: 100,
+                effect: 'none'
+            });
+        }
+
+        console.log(`Successfully updated character '${char}' to ${newLedCount} LEDs`);
+
+        // Update the LED count display below the character
+        this.updateCharacterLEDCountDisplay(char, newLedCount);
+
+        // Update total LED count (with timeout to prevent blocking)
+        setTimeout(() => {
+            this.updateTotalLEDCount();
+            this.calculateResults();
+        }, 50);
+
+        console.log('Finished applyCharacterLEDCount');
+    }
+
+    updateCharacterLEDCountDisplay(char, ledCount) {
+        // Find or create LED count display below the character
+        const charGroup = this.state.selectedCharGroup;
+        if (!charGroup) return;
+
+        // Remove existing count display
+        const existingCount = charGroup.querySelector('.led-count-display');
+        if (existingCount) {
+            existingCount.remove();
+        }
+
+        // Create new count display
+        const bbox = charGroup.getBBox();
+        const countText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        countText.setAttribute("x", bbox.x + bbox.width / 2);
+        countText.setAttribute("y", bbox.y + bbox.height + 25);
+        countText.setAttribute("text-anchor", "middle");
+        countText.setAttribute("font-size", "16");
+        countText.setAttribute("font-weight", "bold");
+        countText.setAttribute("fill", "#333");
+        countText.setAttribute("class", "led-count-display");
+        countText.textContent = ledCount.toString();
+
+        charGroup.appendChild(countText);
+    }
+
+    updateTotalLEDCount() {
+        // Calculate total LED count across all characters
+        let totalCount = 0;
+        const defaultLedCount = parseInt(document.getElementById('ledCount').value) || 5;
+
+        for (const char of this.state.currentText) {
+            if (char !== ' ') {
+                const charLedCount = this.state.ledCountPerChar[char] || defaultLedCount;
+                totalCount += charLedCount;
+                console.log(`Character '${char}': ${charLedCount} LEDs`);
+            }
+        }
+
+        // Update results panel
+        const modulesCountElement = document.getElementById('modulesCount');
+        if (modulesCountElement) {
+            modulesCountElement.textContent = totalCount;
+        }
+
+        // Also update any other total count displays
+        const totalCountDisplays = document.querySelectorAll('.total-led-count');
+        totalCountDisplays.forEach(display => {
+            display.textContent = totalCount;
+        });
+
+        console.log('Total LED count updated to:', totalCount);
+        return totalCount;
+    }
+
+    addCharacterLEDCountDisplay(charGroup, char, ledCount) {
+        // Add LED count display below the character
+        const bbox = charGroup.getBBox();
+        const countText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        countText.setAttribute("x", bbox.x + bbox.width / 2);
+        countText.setAttribute("y", bbox.y + bbox.height + 25);
+        countText.setAttribute("text-anchor", "middle");
+        countText.setAttribute("font-size", "16");
+        countText.setAttribute("font-weight", "bold");
+        countText.setAttribute("fill", "#333");
+        countText.setAttribute("class", "led-count-display");
+        countText.textContent = ledCount.toString();
+
+        charGroup.appendChild(countText);
+    }
+
+    addHeightMeasurement(mainGroup, bbox) {
+        const svgNS = "http://www.w3.org/2000/svg";
+
+        // Get the height input value
+        const heightInput = document.getElementById('height');
+        const heightValue = heightInput ? parseFloat(heightInput.value).toFixed(1) : "35.0";
+
+        // Create measurement group
+        const measurementGroup = document.createElementNS(svgNS, "g");
+        measurementGroup.setAttribute("class", "height-measurement");
+
+        // Vertical line on the left
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", bbox.x - 40);
+        line.setAttribute("y1", bbox.y);
+        line.setAttribute("x2", bbox.x - 40);
+        line.setAttribute("y2", bbox.y + bbox.height);
+        line.setAttribute("stroke", "#333");
+        line.setAttribute("stroke-width", "2");
+        measurementGroup.appendChild(line);
+
+        // Top horizontal tick
+        const topTick = document.createElementNS(svgNS, "line");
+        topTick.setAttribute("x1", bbox.x - 45);
+        topTick.setAttribute("y1", bbox.y);
+        topTick.setAttribute("x2", bbox.x - 35);
+        topTick.setAttribute("y2", bbox.y);
+        topTick.setAttribute("stroke", "#333");
+        topTick.setAttribute("stroke-width", "2");
+        measurementGroup.appendChild(topTick);
+
+        // Bottom horizontal tick
+        const bottomTick = document.createElementNS(svgNS, "line");
+        bottomTick.setAttribute("x1", bbox.x - 45);
+        bottomTick.setAttribute("y1", bbox.y + bbox.height);
+        bottomTick.setAttribute("x2", bbox.x - 35);
+        bottomTick.setAttribute("y2", bbox.y + bbox.height);
+        bottomTick.setAttribute("stroke", "#333");
+        bottomTick.setAttribute("stroke-width", "2");
+        measurementGroup.appendChild(bottomTick);
+
+        // Height text
+        const heightText = document.createElementNS(svgNS, "text");
+        heightText.setAttribute("x", bbox.x - 60);
+        heightText.setAttribute("y", bbox.y + bbox.height / 2);
+        heightText.setAttribute("text-anchor", "end");
+        heightText.setAttribute("dominant-baseline", "middle");
+        heightText.setAttribute("font-size", "18");
+        heightText.setAttribute("font-weight", "normal");
+        heightText.setAttribute("fill", "#333");
+        heightText.textContent = `${heightValue}"`;
+        measurementGroup.appendChild(heightText);
+
+        mainGroup.appendChild(measurementGroup);
+    }
+
+    hideCharacterLEDControls() {
+        console.log('Attempting to hide character LED controls');
+
+        const charControlPanel = document.getElementById('characterLEDControl');
+        if (charControlPanel) {
+            charControlPanel.style.display = 'none';
+            charControlPanel.remove(); // Completely remove the panel
+            console.log('Character control panel removed');
+        }
+
+        // Deselect character
+        if (this.state.selectedCharGroup) {
+            const outline = this.state.selectedCharGroup.querySelector('.letter-outline');
+            if (outline) outline.classList.remove('selected');
+            this.state.selectedCharGroup = null;
+            console.log('Character deselected');
+        }
     }
 
     selectLED(led) {
@@ -517,7 +856,7 @@ class LEDConfigurator {
         
         resultsPanel.classList.remove('hidden');
         
-        const text = this.state.currentText.toUpperCase();
+        const text = this.state.currentText;
         const selectedModule = CONFIG_DATA.modules[document.getElementById('module').value];
         const selectedPowerSupply = CONFIG_DATA.powerSupplies[document.getElementById('powerSupply').value];
         const letterHeightInches = parseFloat(document.getElementById('height').value);
