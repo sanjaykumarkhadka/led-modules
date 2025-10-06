@@ -211,3 +211,32 @@ body {
     pointer-events: none;
     white-space: nowrap;
 }
+
+/* Custom Artwork Styles */
+.artwork-outline {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.artwork-outline:hover {
+    stroke: #3b82f6 !important;
+    stroke-width: 3 !important;
+}
+
+.artwork-element {
+    cursor: move;
+}
+
+/* Drop zone hover state */
+#dropZone.border-blue-500 {
+    border-color: #3b82f6 !important;
+}
+
+#dropZone.bg-blue-50 {
+    background-color: #eff6ff;
+}
+
+/* Tab content visibility */
+.tab-content.hidden {
+    display: none;
+}

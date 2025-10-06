@@ -16,16 +16,46 @@ class LEDConfigurator {
             selectedCharGroup: null,
             selectedLed: null,
             currentText: '',
-            ledCountPerChar: {}
+            ledCountPerChar: {},
+            currentTab: 'channel-letter',
+            uploadedSVG: null,
+            artworkElements: []
         };
-        
+
         this.init();
+    }
+
+    applyInitialTabFromURL() {
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const tabParam = params.get('tab');
+            if (!tabParam) return;
+
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(t => {
+                const indicator = t.querySelector('.tab-indicator');
+                t.classList.remove('tab-active');
+                if (indicator) indicator.style.transform = 'scaleX(0)';
+            });
+
+            const target = document.querySelector(`.tab[data-tab="${tabParam}"]`);
+            if (target) {
+                target.classList.add('tab-active');
+                const indicator = target.querySelector('.tab-indicator');
+                if (indicator) indicator.style.transform = 'scaleX(1)';
+                this.state.currentTab = tabParam;
+                this.switchTabContent(tabParam);
+            }
+        } catch (e) {
+            console.warn('Failed to apply initial tab from URL:', e);
+        }
     }
 
     async init() {
         await this.loadFont();
         this.attachEventListeners();
         this.setupInitialState();
+        this.applyInitialTabFromURL();
     }
 
     async loadFont(languageCode = 'en') {
@@ -164,17 +194,616 @@ class LEDConfigurator {
                 await this.loadFont(e.target.value);
                 // Re-render text if any exists
                 if (this.state.currentText) {
-                    this.renderText();
+                    await this.renderText();
                 }
             });
         }
 
         // Tab switching
         this.attachTabListeners();
-        
+
+        // Custom Artwork handlers
+        this.attachCustomArtworkListeners();
+
         // Document-wide drag events
         document.addEventListener('mousemove', (e) => this.dragElement(e));
         document.addEventListener('mouseup', () => this.stopDragging());
+    }
+
+    attachCustomArtworkListeners() {
+        const dropZone = document.getElementById('dropZone');
+        const browseBtn = document.getElementById('browseBtn');
+        const artworkFile = document.getElementById('artworkFile');
+        const removeFile = document.getElementById('removeFile');
+        const populateArtworkBtn = document.getElementById('populateArtworkBtn');
+        const clearArtworkBtn = document.getElementById('clearArtworkBtn');
+        const artworkModeRadios = document.querySelectorAll('input[name="artworkMode"]');
+        const fileUploadMode = document.getElementById('fileUploadMode');
+        const textInputMode = document.getElementById('textInputMode');
+        const artworkText = document.getElementById('artworkText');
+
+        // Mode switching
+        artworkModeRadios.forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const mode = e.target.value;
+                if (mode === 'file') {
+                    fileUploadMode.classList.remove('hidden');
+                    textInputMode.classList.add('hidden');
+                    // Enable populate button if file is uploaded
+                    if (populateArtworkBtn) {
+                        populateArtworkBtn.disabled = !this.state.uploadedSVG && !this.state.uploadedPDF;
+                    }
+                } else if (mode === 'text') {
+                    fileUploadMode.classList.add('hidden');
+                    textInputMode.classList.remove('hidden');
+                    // Enable populate button if text is entered
+                    if (populateArtworkBtn && artworkText) {
+                        populateArtworkBtn.disabled = artworkText.value.trim() === '';
+                    }
+                }
+            });
+        });
+
+        // Text input change - enable populate button
+        if (artworkText) {
+            artworkText.addEventListener('input', () => {
+                const selectedMode = document.querySelector('input[name="artworkMode"]:checked')?.value;
+                if (selectedMode === 'text' && populateArtworkBtn) {
+                    populateArtworkBtn.disabled = artworkText.value.trim() === '';
+                }
+            });
+        }
+
+        // Browse button
+        if (browseBtn && artworkFile) {
+            browseBtn.addEventListener('click', () => artworkFile.click());
+        }
+
+        // File input change
+        if (artworkFile) {
+            artworkFile.addEventListener('change', (e) => this.handleArtworkUpload(e.target.files[0]));
+        }
+
+        // Drag and drop
+        if (dropZone) {
+            dropZone.addEventListener('click', () => artworkFile.click());
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+            });
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-blue-500', 'bg-blue-50');
+                const file = e.dataTransfer.files[0];
+                if (file && file.type === 'image/svg+xml') {
+                    this.handleArtworkUpload(file);
+                }
+            });
+        }
+
+        // Remove file
+        if (removeFile) {
+            removeFile.addEventListener('click', () => this.clearArtworkUpload());
+        }
+
+        // Populate artwork
+        if (populateArtworkBtn) {
+            populateArtworkBtn.addEventListener('click', () => this.renderCustomArtwork());
+        }
+
+        // Clear artwork
+        if (clearArtworkBtn) {
+            clearArtworkBtn.addEventListener('click', () => {
+                this.clearArtworkUpload();
+                if (artworkText) artworkText.value = '';
+                if (populateArtworkBtn) populateArtworkBtn.disabled = true;
+                this.clearCanvas();
+            });
+        }
+    }
+
+    handleArtworkUpload(file) {
+        if (!file) return;
+
+        const validTypes = ['application/pdf', 'application/postscript', 'image/svg+xml'];
+        const validExtensions = ['.pdf', '.eps', '.svg'];
+        const fileName = file.name.toLowerCase();
+        const hasValidExtension = validExtensions.some(ext => fileName.endsWith(ext));
+
+        if (!validTypes.includes(file.type) && !hasValidExtension) {
+            alert('Please upload a valid PDF, EPS, or SVG file');
+            return;
+        }
+
+        this.state.uploadedFile = file;
+        this.state.uploadedFileType = fileName.endsWith('.pdf') ? 'pdf' :
+                                       fileName.endsWith('.eps') ? 'eps' : 'svg';
+
+        // Show file info
+        const fileInfo = document.getElementById('fileInfo');
+        const fileNameDisplay = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const populateBtn = document.getElementById('populateArtworkBtn');
+        const manualConfig = document.getElementById('manualLEDConfig');
+
+        if (fileInfo) fileInfo.classList.remove('hidden');
+        if (fileNameDisplay) fileNameDisplay.textContent = file.name;
+        if (fileSize) fileSize.textContent = `${(file.size / 1024).toFixed(2)} KB`;
+        if (populateBtn) populateBtn.disabled = false;
+
+        // Show manual LED config for PDF/EPS
+        if (manualConfig) {
+            if (this.state.uploadedFileType === 'pdf' || this.state.uploadedFileType === 'eps') {
+                manualConfig.classList.remove('hidden');
+            } else {
+                manualConfig.classList.add('hidden');
+            }
+        }
+
+        // For SVG, read text immediately
+        if (this.state.uploadedFileType === 'svg') {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.state.uploadedSVG = e.target.result;
+            };
+            reader.readAsText(file);
+        } else if (this.state.uploadedFileType === 'pdf') {
+            // For PDF, read as array buffer
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                this.state.uploadedPDF = e.target.result;
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    }
+
+    clearArtworkUpload() {
+        this.state.uploadedSVG = null;
+        this.state.artworkElements = [];
+
+        const fileInfo = document.getElementById('fileInfo');
+        const artworkFile = document.getElementById('artworkFile');
+        const populateBtn = document.getElementById('populateArtworkBtn');
+
+        if (fileInfo) fileInfo.classList.add('hidden');
+        if (artworkFile) artworkFile.value = '';
+        if (populateBtn) populateBtn.disabled = true;
+    }
+
+    async renderCustomArtwork() {
+        const loader = document.getElementById('loader');
+        loader.style.display = 'block';
+
+        try {
+            // Check which mode is selected
+            const selectedMode = document.querySelector('input[name="artworkMode"]:checked')?.value;
+
+            if (selectedMode === 'text') {
+                // Use text input mode - render with custom artwork dimensions
+                const artworkText = document.getElementById('artworkText');
+                if (artworkText && artworkText.value.trim()) {
+                    await this.renderCustomArtworkText(artworkText.value);
+                } else {
+                    alert('Please enter some text to render.');
+                }
+            } else {
+                // Use file upload mode
+                if (this.state.uploadedFileType === 'pdf') {
+                    await this.renderPDFArtwork();
+                } else if (this.state.uploadedFileType === 'svg') {
+                    await this.renderSVGArtwork();
+                } else if (this.state.uploadedFileType === 'eps') {
+                    alert('EPS files require conversion. Please convert to PDF or SVG first.');
+                    loader.style.display = 'none';
+                    return;
+                }
+            }
+        } catch (error) {
+            console.error('Error rendering artwork:', error);
+            alert('Error processing file. Please try a different file.');
+        }
+
+        loader.style.display = 'none';
+    }
+
+    async renderCustomArtworkText(text) {
+        // Get custom artwork configuration
+        const artworkHeight = parseFloat(document.getElementById('artworkHeight')?.value || 35);
+        const artworkWidth = parseFloat(document.getElementById('artworkWidth')?.value || 25);
+        const artworkLedLines = parseInt(document.getElementById('artworkLedLines')?.value || 5);
+        const artworkLedCountOverride = document.getElementById('artworkLedCount')?.value;
+
+        // Calculate LED count - use override if provided, otherwise calculate
+        let totalLedsPerChar;
+        if (artworkLedCountOverride && artworkLedCountOverride.trim() !== '') {
+            // Use direct override value
+            totalLedsPerChar = parseInt(artworkLedCountOverride);
+        } else {
+            // Calculate based on LED lines and letter dimensions
+            const ledsPerLine = Math.ceil(artworkHeight / 5); // Approximately 1 LED per 5 units of height
+            totalLedsPerChar = artworkLedLines * ledsPerLine;
+        }
+
+        // Store original values
+        const originalHeight = document.getElementById('height')?.value;
+        const originalLedCount = document.getElementById('ledCount')?.value;
+        const originalText = document.getElementById('yourText')?.value;
+
+        // Temporarily set values for rendering
+        if (document.getElementById('height')) {
+            document.getElementById('height').value = artworkHeight;
+        }
+        if (document.getElementById('ledCount')) {
+            document.getElementById('ledCount').value = totalLedsPerChar;
+        }
+        if (document.getElementById('yourText')) {
+            document.getElementById('yourText').value = text;
+        }
+
+        // Render using the standard renderText method
+        await this.renderText();
+
+        // Add custom annotations for width and LED lines count
+        this.addCustomArtworkAnnotations(artworkWidth, artworkLedLines);
+
+        // Restore original values
+        if (document.getElementById('height') && originalHeight) {
+            document.getElementById('height').value = originalHeight;
+        }
+        if (document.getElementById('ledCount') && originalLedCount) {
+            document.getElementById('ledCount').value = originalLedCount;
+        }
+        if (document.getElementById('yourText') && originalText) {
+            document.getElementById('yourText').value = originalText;
+        }
+    }
+
+    addCustomArtworkAnnotations(width, ledLines) {
+        const svg = document.querySelector('#svgContainer svg');
+        if (!svg) return;
+
+        const svgNS = "http://www.w3.org/2000/svg";
+        const mainGroup = svg.querySelector('g');
+        if (!mainGroup) return;
+
+        // Get unit
+        const isMetric = document.getElementById('unitToggle')?.checked || false;
+        const unit = isMetric ? 'mm' : 'in';
+        const widthValue = isMetric ? (width * 25.4).toFixed(2) : width.toFixed(2);
+
+        // Add width annotation for the first letter
+        const firstCharGroup = mainGroup.querySelector('.char-group');
+        if (firstCharGroup) {
+            const bbox = firstCharGroup.getBBox();
+
+            // Width annotation group
+            const widthGroup = document.createElementNS(svgNS, "g");
+            widthGroup.setAttribute("class", "width-annotation");
+
+            // Top horizontal line
+            const topLine = document.createElementNS(svgNS, "line");
+            topLine.setAttribute("x1", bbox.x);
+            topLine.setAttribute("y1", bbox.y - 30);
+            topLine.setAttribute("x2", bbox.x + bbox.width);
+            topLine.setAttribute("y2", bbox.y - 30);
+            topLine.setAttribute("stroke", "#333");
+            topLine.setAttribute("stroke-width", "2");
+            widthGroup.appendChild(topLine);
+
+            // Left tick
+            const leftTick = document.createElementNS(svgNS, "line");
+            leftTick.setAttribute("x1", bbox.x);
+            leftTick.setAttribute("y1", bbox.y - 35);
+            leftTick.setAttribute("x2", bbox.x);
+            leftTick.setAttribute("y2", bbox.y - 25);
+            leftTick.setAttribute("stroke", "#333");
+            leftTick.setAttribute("stroke-width", "2");
+            widthGroup.appendChild(leftTick);
+
+            // Right tick
+            const rightTick = document.createElementNS(svgNS, "line");
+            rightTick.setAttribute("x1", bbox.x + bbox.width);
+            rightTick.setAttribute("y1", bbox.y - 35);
+            rightTick.setAttribute("x2", bbox.x + bbox.width);
+            rightTick.setAttribute("y2", bbox.y - 25);
+            rightTick.setAttribute("stroke", "#333");
+            rightTick.setAttribute("stroke-width", "2");
+            widthGroup.appendChild(rightTick);
+
+            // Width text
+            const widthText = document.createElementNS(svgNS, "text");
+            widthText.setAttribute("x", bbox.x + bbox.width / 2);
+            widthText.setAttribute("y", bbox.y - 35);
+            widthText.setAttribute("text-anchor", "middle");
+            widthText.setAttribute("font-size", "16");
+            widthText.setAttribute("font-family", "Arial, sans-serif");
+            widthText.setAttribute("fill", "#333");
+            widthText.textContent = `${widthValue} ${unit}`;
+            widthGroup.appendChild(widthText);
+
+            mainGroup.appendChild(widthGroup);
+        }
+    }
+
+    async renderPDFArtwork() {
+        if (!this.state.uploadedPDF) return;
+
+        const svgContainer = document.getElementById('svgContainer');
+        svgContainer.innerHTML = '';
+
+        // Get manual configuration
+        const numElements = parseInt(document.getElementById('numElements').value) || 1;
+        const ledsPerElement = parseInt(document.getElementById('ledsPerElement').value) || 50;
+        const elementNamesInput = document.getElementById('elementNames').value;
+        const elementNames = elementNamesInput ? elementNamesInput.split(',').map(n => n.trim()) : [];
+
+        // Configure PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Load PDF
+        const loadingTask = pdfjsLib.getDocument({data: this.state.uploadedPDF});
+        const pdf = await loadingTask.promise;
+
+        // Get first page
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({scale: 1.5});
+
+        // Create canvas to render PDF
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        // Render PDF page to canvas
+        await page.render({
+            canvasContext: context,
+            viewport: viewport
+        }).promise;
+
+        // Convert canvas to image and display
+        const imgData = canvas.toDataURL('image/png');
+        const img = document.createElement('img');
+        img.src = imgData;
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.border = '2px solid #e5e7eb';
+        img.style.borderRadius = '8px';
+        svgContainer.appendChild(img);
+
+        // Create Manubhai-style breakdown table
+        this.createArtworkBreakdown(numElements, ledsPerElement, elementNames);
+
+        // Calculate totals
+        const totalLEDs = numElements * ledsPerElement;
+        this.calculateCustomArtworkResults(totalLEDs, numElements, ledsPerElement);
+    }
+
+    async renderSVGArtwork() {
+        if (!this.state.uploadedSVG) return;
+
+        // Clear and setup SVG
+        const svgContainer = document.getElementById('svgContainer');
+        svgContainer.innerHTML = '';
+
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+        // Parse uploaded SVG
+        const parser = new DOMParser();
+        const svgDoc = parser.parseFromString(this.state.uploadedSVG, 'image/svg+xml');
+        const uploadedSvg = svgDoc.documentElement;
+
+        // Create main group
+        const mainGroup = document.createElementNS(svgNS, "g");
+        mainGroup.setAttribute("id", "mainGroup");
+
+        // Get all path elements from uploaded SVG
+        const paths = uploadedSvg.querySelectorAll('path, rect, circle, ellipse, polygon, polyline');
+        const ledCount = parseInt(document.getElementById('ledCount').value);
+        const ledColor = document.getElementById('ledColor').value;
+
+        this.state.artworkElements = [];
+        let elementIndex = 0;
+
+        // Process each shape
+        paths.forEach((shape) => {
+            const shapeGroup = document.createElementNS(svgNS, "g");
+            shapeGroup.setAttribute("class", "artwork-element");
+            shapeGroup.setAttribute("data-element", elementIndex);
+
+            // Clone and add the shape outline
+            const outline = shape.cloneNode(true);
+            outline.setAttribute("class", "artwork-outline");
+            outline.setAttribute("fill", "none");
+            outline.setAttribute("stroke", document.getElementById('strokeColor').value);
+            outline.setAttribute("stroke-width", document.getElementById('strokeWidth').value);
+            shapeGroup.appendChild(outline);
+
+            // Add fill
+            const fill = shape.cloneNode(true);
+            fill.setAttribute("class", "artwork-fill");
+            fill.setAttribute("fill", "white");
+            fill.setAttribute("stroke", "none");
+            fill.setAttribute("opacity", "0");
+            shapeGroup.appendChild(fill);
+
+            mainGroup.appendChild(shapeGroup);
+
+            // Store element info for LED placement
+            this.state.artworkElements.push({
+                element: outline,
+                group: shapeGroup,
+                ledCount: ledCount
+            });
+
+            elementIndex++;
+        });
+
+        svg.appendChild(mainGroup);
+        svgContainer.appendChild(svg);
+
+        // Calculate viewBox
+        try {
+            const bbox = mainGroup.getBBox();
+            svg.setAttribute("viewBox",
+                `${bbox.x - 20} ${bbox.y - 20} ${bbox.width + 40} ${bbox.height + 40}`);
+
+            // Add dimensions annotations
+            this.addArtworkDimensions(mainGroup, bbox);
+
+            // Place LEDs on each element
+            this.state.artworkElements.forEach((artworkEl, index) => {
+                const outlinePath = artworkEl.element;
+                const shapeGroup = artworkEl.group;
+
+                if (outlinePath) {
+                    this.ledPlacer.placeLEDsInside(outlinePath, shapeGroup, ledCount, {
+                        color: ledColor,
+                        brightness: 100,
+                        effect: 'none'
+                    });
+
+                    // Add LED count display
+                    const bbox = shapeGroup.getBBox();
+                    const countText = document.createElementNS(svgNS, "text");
+                    countText.setAttribute("x", bbox.x + bbox.width / 2);
+                    countText.setAttribute("y", bbox.y + bbox.height + 25);
+                    countText.setAttribute("text-anchor", "middle");
+                    countText.setAttribute("font-size", "16");
+                    countText.setAttribute("font-weight", "bold");
+                    countText.setAttribute("fill", "#333");
+                    countText.setAttribute("class", "led-count-display");
+                    countText.textContent = `${ledCount} LEDs`;
+                    shapeGroup.appendChild(countText);
+                }
+            });
+
+            // Calculate total LEDs
+            const totalLEDs = this.state.artworkElements.length * ledCount;
+            this.calculateCustomArtworkResults(totalLEDs);
+
+        } catch (error) {
+            console.error('Error rendering artwork:', error);
+        }
+
+        loader.style.display = 'none';
+    }
+
+    addArtworkDimensions(mainGroup, bbox) {
+        const svgNS = "http://www.w3.org/2000/svg";
+
+        // Add width dimension (top)
+        const widthLine = document.createElementNS(svgNS, "line");
+        widthLine.setAttribute("x1", bbox.x);
+        widthLine.setAttribute("y1", bbox.y - 30);
+        widthLine.setAttribute("x2", bbox.x + bbox.width);
+        widthLine.setAttribute("y2", bbox.y - 30);
+        widthLine.setAttribute("stroke", "#333");
+        widthLine.setAttribute("stroke-width", "2");
+        widthLine.setAttribute("marker-start", "url(#arrowStart)");
+        widthLine.setAttribute("marker-end", "url(#arrowEnd)");
+        mainGroup.appendChild(widthLine);
+
+        const widthText = document.createElementNS(svgNS, "text");
+        widthText.setAttribute("x", bbox.x + bbox.width / 2);
+        widthText.setAttribute("y", bbox.y - 35);
+        widthText.setAttribute("text-anchor", "middle");
+        widthText.setAttribute("font-size", "14");
+        widthText.setAttribute("font-weight", "bold");
+        widthText.setAttribute("fill", "#333");
+        widthText.textContent = `${(bbox.width * 0.264583).toFixed(2)} mm`;
+        mainGroup.appendChild(widthText);
+
+        // Add height dimension (left)
+        const heightLine = document.createElementNS(svgNS, "line");
+        heightLine.setAttribute("x1", bbox.x - 30);
+        heightLine.setAttribute("y1", bbox.y);
+        heightLine.setAttribute("x2", bbox.x - 30);
+        heightLine.setAttribute("y2", bbox.y + bbox.height);
+        heightLine.setAttribute("stroke", "#333");
+        heightLine.setAttribute("stroke-width", "2");
+        mainGroup.appendChild(heightLine);
+
+        const heightText = document.createElementNS(svgNS, "text");
+        heightText.setAttribute("x", bbox.x - 40);
+        heightText.setAttribute("y", bbox.y + bbox.height / 2);
+        heightText.setAttribute("text-anchor", "end");
+        heightText.setAttribute("dominant-baseline", "middle");
+        heightText.setAttribute("font-size", "14");
+        heightText.setAttribute("font-weight", "bold");
+        heightText.setAttribute("fill", "#333");
+        heightText.textContent = `${(bbox.height * 0.264583).toFixed(2)} mm`;
+        mainGroup.appendChild(heightText);
+    }
+
+    createArtworkBreakdown(numElements, ledsPerElement, elementNames) {
+        const svgContainer = document.getElementById('svgContainer');
+
+        const breakdownDiv = document.createElement('div');
+        breakdownDiv.className = 'mt-6 bg-white rounded-lg border border-gray-200 p-6';
+
+        let html = '<h3 class="text-lg font-semibold mb-4 text-gray-800">LED Module Breakdown</h3>';
+        html += '<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">';
+
+        for (let i = 0; i < numElements; i++) {
+            const elementName = elementNames[i] || `Element ${i + 1}`;
+            const totalModules = ledsPerElement;
+            const selectedModule = CONFIG_DATA.modules[document.getElementById('module').value];
+            const wattage = (totalModules * selectedModule.wattsPerModule).toFixed(1);
+
+            html += `
+                <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="font-semibold text-gray-700">${elementName}</h4>
+                        <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">#${i + 1}</span>
+                    </div>
+                    <div class="space-y-2 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Total Modules:</span>
+                            <span class="font-semibold text-gray-900">${totalModules}</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Wattage:</span>
+                            <span class="font-semibold text-gray-900">${wattage} W</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += '</div>';
+        breakdownDiv.innerHTML = html;
+        svgContainer.appendChild(breakdownDiv);
+    }
+
+    calculateCustomArtworkResults(totalLEDs, numElements = 1, ledsPerElement = 0) {
+        const resultsPanel = document.getElementById('resultsPanel');
+        if (!resultsPanel) return;
+
+        resultsPanel.classList.remove('hidden');
+
+        const selectedModule = CONFIG_DATA.modules[document.getElementById('module').value];
+        const selectedPowerSupply = CONFIG_DATA.powerSupplies[document.getElementById('powerSupply').value];
+
+        // Update module count
+        document.getElementById('modulesCount').textContent = totalLEDs;
+
+        // Calculate power
+        const powerRequiredValue = totalLEDs * selectedModule.wattsPerModule;
+        document.getElementById('powerRequired').textContent = `${powerRequiredValue.toFixed(1)} W`;
+
+        // Calculate power supplies needed
+        const powerSuppliesNeeded = Math.ceil(powerRequiredValue / selectedPowerSupply.maxWatts);
+        document.getElementById('powerSuppliesCount').textContent = powerSuppliesNeeded;
+
+        // Update stroke length with element info if available
+        if (numElements > 1) {
+            document.getElementById('strokeLength').textContent = `${numElements} elements`;
+        }
     }
 
     attachToolbarListeners() {
@@ -279,19 +908,49 @@ class LEDConfigurator {
         const tabs = document.querySelectorAll('.tab');
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
+                const tabName = tab.getAttribute('data-tab');
+
+                // If user selects Cabinet, navigate to the dedicated Cabinet page
+                if (tabName === 'cabinet') {
+                    window.location.href = 'box.html';
+                    return;
+                }
+
                 // Remove active class from all tabs
                 tabs.forEach(t => {
                     t.classList.remove('tab-active');
                     const indicator = t.querySelector('.tab-indicator');
                     if (indicator) indicator.style.transform = 'scaleX(0)';
                 });
-                
+
                 // Add active class to clicked tab
                 tab.classList.add('tab-active');
                 const indicator = tab.querySelector('.tab-indicator');
                 if (indicator) indicator.style.transform = 'scaleX(1)';
+
+                // Update current tab state
+                this.state.currentTab = tabName;
+
+                // Show/hide appropriate input sections
+                this.switchTabContent(tabName);
             });
         });
+    }
+
+    switchTabContent(tabName) {
+        // Hide all tab content
+        const channelLetterInput = document.getElementById('channelLetterInput');
+        const customArtworkInput = document.getElementById('customArtworkInput');
+
+        if (channelLetterInput) channelLetterInput.classList.add('hidden');
+        if (customArtworkInput) customArtworkInput.classList.add('hidden');
+
+        // Show relevant content
+        if (tabName === 'channel-letter' && channelLetterInput) {
+            channelLetterInput.classList.remove('hidden');
+        } else if (tabName === 'custom-artwork' && customArtworkInput) {
+            customArtworkInput.classList.remove('hidden');
+        }
     }
 
     setupInitialState() {
@@ -525,7 +1184,7 @@ class LEDConfigurator {
                         <button id="decreaseCharLeds" class="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-100">
                             <i class="fas fa-minus"></i>
                         </button>
-                        <input type="number" id="charLedCount" value="${currentLedCount}" min="1" max="20" class="w-16 text-center border border-gray-300 rounded px-2 py-1">
+                        <input type="number" id="charLedCount" value="${currentLedCount}" min="1" class="w-16 text-center border border-gray-300 rounded px-2 py-1">
                         <button id="increaseCharLeds" class="w-8 h-8 flex items-center justify-center border border-gray-300 rounded hover:bg-gray-100">
                             <i class="fas fa-plus"></i>
                         </button>
@@ -553,9 +1212,7 @@ class LEDConfigurator {
 
         increaseBtn.onclick = () => {
             const input = charControlPanel.querySelector('#charLedCount');
-            if (parseInt(input.value) < 20) {
-                input.value = parseInt(input.value) + 1;
-            }
+            input.value = parseInt(input.value) + 1;
         };
 
         applyBtn.onclick = () => {
@@ -636,7 +1293,7 @@ class LEDConfigurator {
 
         const newLedCount = parseInt(charLedCountInput.value);
 
-        if (!char || isNaN(newLedCount) || newLedCount < 1 || newLedCount > 20) {
+        if (!char || isNaN(newLedCount) || newLedCount < 1) {
             console.warn('Invalid character or LED count:', { char, newLedCount });
             return;
         }
@@ -923,12 +1580,21 @@ class LEDConfigurator {
 
         // Process all characters including newlines
         for (const char of text) {
-            if (char === ' ' || char === '\n' || !CONFIG_DATA.characterData[char]) continue;
-            const charData = CONFIG_DATA.characterData[char];
+            if (char === ' ' || char === '\n') continue;
+
             // Use per-character LED count if available, otherwise use default
             const charLedCount = this.state.ledCountPerChar[char] || defaultLedCount;
             totalModules += charLedCount;
-            totalPerimeter += charData.perimeter * letterHeightFeet;
+
+            // Get perimeter - use characterData if available, otherwise calculate from rendered path
+            if (CONFIG_DATA.characterData[char]) {
+                const charData = CONFIG_DATA.characterData[char];
+                totalPerimeter += charData.perimeter * letterHeightFeet;
+            } else {
+                // Calculate perimeter from actual rendered character
+                const perimeter = this.getCharacterPerimeter(char, letterHeightFeet);
+                totalPerimeter += perimeter;
+            }
         }
         
         const unit = document.getElementById('unitToggle').checked ? 'cm' : 'in';
@@ -1019,15 +1685,47 @@ class LEDConfigurator {
         this.state.currentText = '';
     }
 
+    getCharacterPerimeter(char, letterHeightFeet) {
+        // Find the rendered character in the DOM
+        const charGroups = document.querySelectorAll('.character-group');
+        for (const charGroup of charGroups) {
+            if (charGroup.getAttribute('data-char') === char) {
+                const pathElement = charGroup.querySelector('.letter-outline');
+                if (pathElement) {
+                    try {
+                        // Get the total length of the path (perimeter) in pixels
+                        const pathLength = pathElement.getTotalLength();
+
+                        // The path is rendered at fontSize (pixels), which represents letterHeightInches
+                        const fontSize = CONFIG_DATA.defaults.fontSize; // 150 pixels
+                        const letterHeightInches = parseFloat(document.getElementById('height').value);
+
+                        // Convert path length to inches, then to feet
+                        const perimeterInches = pathLength * (letterHeightInches / fontSize);
+                        const perimeterFeet = perimeterInches / 12;
+
+                        return perimeterFeet;
+                    } catch (e) {
+                        console.warn(`Could not calculate perimeter for character '${char}':`, e);
+                    }
+                }
+            }
+        }
+
+        // Fallback: use average perimeter if character not found
+        // Average perimeter is about 8 feet for a 1-foot tall letter
+        return 8.0 * letterHeightFeet;
+    }
+
     updateUnits() {
         const isMetric = document.getElementById('unitToggle').checked;
-        const units = ['heightUnit', 'depthUnit', 'modulePitchUnit'];
-        
+        const units = ['heightUnit', 'depthUnit', 'modulePitchUnit', 'artworkHeightUnit', 'artworkWidthUnit'];
+
         units.forEach(id => {
             const element = document.getElementById(id);
             if (element) element.textContent = isMetric ? 'cm' : 'in';
         });
-        
+
         if (this.state.currentText) {
             this.calculateResults();
         }

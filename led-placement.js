@@ -2,7 +2,7 @@
 
 class LEDPlacer {
     constructor() {
-        this.ledSize = 12; // Size of LED modules (increased for better visibility)
+        this.ledSize = 8.4; // Size of LED modules (30% smaller for higher density)
         this.ledSpacing = 0.75; // Spacing factor between LEDs
     }
 
@@ -79,12 +79,13 @@ class LEDPlacer {
 
             // Calculate minimum spacing between LEDs based on available area
             const letterArea = bbox.width * bbox.height;
-            const minSpacing = Math.sqrt(letterArea / ledCount) * 0.8;
+            const minSpacing = Math.sqrt(letterArea / ledCount) * 0.5;
             console.log('Minimum spacing between LEDs:', minSpacing);
 
             // Generate many candidate positions along the path at various offsets
             const candidates = [];
-            const samplesPerLED = 50; // Generate many candidates
+            // Scale samples based on LED count - more LEDs need more candidates
+            const samplesPerLED = Math.max(100, Math.min(300, ledCount * 5));
             const totalSamples = ledCount * samplesPerLED;
 
             for (let i = 0; i < totalSamples; i++) {
@@ -94,12 +95,12 @@ class LEDPlacer {
                     const point = pathElement.getPointAtLength(distance);
                     const normal = this.calculateNormal(pathElement, distance);
 
-                    // Try different offset distances from the path
-                    const offsets = [
-                        offsetDistance * 0.5,
-                        offsetDistance * 0.7,
-                        offsetDistance * 0.9
-                    ];
+                    // Try more offset distances for higher LED counts
+                    const numOffsets = Math.min(7, Math.ceil(ledCount / 8));
+                    const offsets = [];
+                    for (let j = 0; j < numOffsets; j++) {
+                        offsets.push(offsetDistance * (0.3 + (j * 0.12)));
+                    }
 
                     for (const offset of offsets) {
                         const ledX = point.x - normal.x * offset;
@@ -159,6 +160,9 @@ class LEDPlacer {
         selected.push(available[firstIndex]);
         available.splice(firstIndex, 1);
 
+        // Dynamically adjust spacing threshold based on progress
+        let spacingThreshold = minSpacing * 0.5;
+
         // Select remaining points that are well-spaced
         while (selected.length < count && available.length > 0) {
             let bestCandidate = null;
@@ -183,13 +187,16 @@ class LEDPlacer {
                 }
             }
 
-            if (bestCandidate && maxMinDist >= minSpacing * 0.7) {
+            if (bestCandidate) {
+                // Always accept the best candidate
                 selected.push(bestCandidate);
                 available.splice(bestCandidateIndex, 1);
-            } else if (bestCandidate) {
-                // Accept even if spacing is less than ideal
-                selected.push(bestCandidate);
-                available.splice(bestCandidateIndex, 1);
+
+                // Gradually reduce spacing threshold if we're not making progress
+                const progress = selected.length / count;
+                if (progress > 0.3 && maxMinDist < spacingThreshold) {
+                    spacingThreshold *= 0.93; // Relax threshold gradually
+                }
             } else {
                 break;
             }
@@ -219,7 +226,8 @@ class LEDPlacer {
         }
 
         // Generate candidate positions in a very dense grid
-        const gridDensity = Math.max(10, Math.ceil(Math.sqrt(ledCount * 8))); // Higher density
+        // Scale grid density with LED count to ensure enough candidates
+        const gridDensity = Math.max(15, Math.ceil(Math.sqrt(ledCount * 10))); // Higher density
         const candidates = [];
 
         for (let row = 0; row < gridDensity; row++) {

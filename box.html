@@ -1,0 +1,1503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qwatt - LED Lighting Cabinet Designer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" onload="console.log('jsPDF loaded successfully')" onerror="console.error('Failed to load jsPDF')"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            overflow: hidden; /* Prevent body scrolling */
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 0;
+        }
+
+        .nav-tab {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            background: #f8f8f8;
+            color: #666;
+            text-decoration: none;
+            font-size: 14px;
+            border-right: none;
+        }
+
+        .nav-tab:first-child {
+            border-top-left-radius: 4px;
+            border-bottom-left-radius: 4px;
+        }
+
+        .nav-tab:last-child {
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+            border-right: 1px solid #ddd;
+        }
+
+        .nav-tab.active {
+            background: white;
+            color: #333;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+            z-index: 1;
+            position: relative;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .units-toggle {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .units-toggle label {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .language-select {
+            font-size: 14px;
+            color: #333;
+        }
+
+
+
+        /* Main Container */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 60px); 
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 50px;
+            background: #f8f8f8;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            padding: 10px 0;
+        }
+
+        .sidebar-icon {
+            width: 40px;
+            height: 40px;
+            margin: 5px auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #666;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar-icon:hover {
+            background: #e8e8e8;
+            color: #333;
+        }
+
+        .sidebar-icon.active {
+            background: #007acc;
+            color: white;
+        }
+
+        /* Content Area */
+        .content-area {
+            flex: 1;
+            display: flex;
+        }
+
+        .canvas-area {
+            flex: 1;
+            background: white;
+            position: relative;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .canvas-header {
+            padding: 10px 15px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .canvas-title {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .canvas-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .action-btn:hover {
+            background: #f0f0f0;
+        }
+
+        .action-btn.primary {
+            background: #333;
+            color: white;
+            border-color: #333;
+        }
+
+        .action-btn.primary:hover {
+            background: #555;
+        }
+
+        /* LED Cabinet Visualization */
+        .cabinet-container {
+            flex-grow: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            overflow: auto;
+        }
+
+        .cabinet-box {
+            border: 3px solid #333;
+            background: linear-gradient(145deg, #f8f8f8 0%, #e8e8e8 100%);
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-radius: 4px;
+            overflow: visible; /* Allow labels to show outside */
+            flex-shrink: 0; /* Prevent the box from shrinking */
+        }
+
+        .cabinet-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 49%, rgba(255,255,255,0.1) 50%, transparent 51%);
+            background-size: 20px 20px;
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        .led-module {
+            position: absolute;
+            width: 20px;
+            height: 8px;
+            background: linear-gradient(145deg, #2a2a2a 0%, #1a1a1a 50%, #0a0a0a 100%);
+            border: 1px solid #444;
+            border-radius: 3px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            padding: 1px;
+        }
+
+        /* Individual LED chips within the module */
+        .led-module::before,
+        .led-module::after {
+            content: '';
+            width: 3px;
+            height: 3px;
+            background: radial-gradient(circle, #00d4ff 20%, #0099cc 70%, #006699 100%);
+            border-radius: 50%;
+            box-shadow: 0 0 3px rgba(0, 212, 255, 0.8);
+            position: relative;
+        }
+
+        .led-module::before {
+            margin-right: 2px;
+        }
+
+        .led-module::after {
+            margin-left: 2px;
+        }
+
+        /* Create middle LED chip */
+        .led-chip-middle {
+            width: 3px;
+            height: 3px;
+            background: radial-gradient(circle, #00d4ff 20%, #0099cc 70%, #006699 100%);
+            border-radius: 50%;
+            box-shadow: 0 0 3px rgba(0, 212, 255, 0.8);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .led-module:hover {
+            transform: scale(1.15);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2);
+            z-index: 10;
+        }
+
+        .led-module:hover::before,
+        .led-module:hover::after,
+        .led-module:hover .led-chip-middle {
+            box-shadow: 0 0 6px rgba(0, 212, 255, 1);
+            background: radial-gradient(circle, #33e6ff 20%, #00b8e6 70%, #0088cc 100%);
+        }
+
+        /* Connection points on module */
+        .led-module-connector {
+            position: absolute;
+            width: 1px;
+            height: 3px;
+            background: #666;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .led-module-connector.left { left: -1px; }
+        .led-module-connector.right { right: -1px; }
+
+        .cabinet-info {
+            position: absolute;
+            top: -30px; /* Adjusted position */
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            background: rgba(255,255,255,0.9);
+            padding: 3px 5px;
+            border-radius: 3px;
+            white-space: nowrap;
+        }
+
+        .module-count {
+            position: absolute;
+            bottom: -25px; /* Adjusted position */
+            left: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 11px;
+            color: #333;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        /* Properties Panel */
+        .properties-panel {
+            width: 300px;
+            background: white;
+            border-left: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .properties-header {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .properties-title {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .filter-btn {
+            background: #333;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .properties-content {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .property-group {
+            margin-bottom: 20px;
+        }
+
+        .property-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .property-label {
+            font-size: 13px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .property-value {
+            min-width: 120px;
+        }
+
+        .property-input {
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        .property-select {
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 13px;
+            background: white;
+        }
+
+        .unit-suffix {
+            font-size: 11px;
+            color: #666;
+            margin-left: 4px;
+        }
+
+        .input-with-unit {
+            display: flex;
+            align-items: center;
+        }
+
+        .input-with-unit input {
+            flex: 1;
+            margin-right: 4px;
+        }
+
+        .properties-footer {
+            padding: 15px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+
+        .footer-btn {
+            flex: 1;
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .footer-btn.populate {
+            background: #333;
+            color: white;
+            border-color: #333;
+        }
+
+        .footer-btn.populate:hover { background: #555; }
+        .footer-btn.clear { background: white; color: #333; }
+        .footer-btn.clear:hover { background: #f0f0f0; }
+
+        /* Quick Start Area */
+        .quick-start {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #666;
+        }
+
+        .quick-start-text {
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo-section">
+            <div class="logo">Qwatt</div>
+            <div class="nav-tabs">
+                <a href="index.html" class="nav-tab">Channel Letter</a>
+                <a href="box.html" class="nav-tab active">Cabinet</a>
+                <a href="index.html?tab=custom-artwork" class="nav-tab">Custom Artwork</a>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="units-toggle">
+                <label><input type="radio" name="units" value="imperial" checked> Imperial</label>
+                <label><input type="radio" name="units" value="metric"> Metric</label>
+            </div>
+            <div class="language-select">English</div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-icon active"><i class="fas fa-mouse-pointer"></i></div>
+            <div class="sidebar-icon"><i class="fas fa-expand-arrows-alt"></i></div>
+            <div class="sidebar-icon"><i class="fas fa-square"></i></div>
+            <div class="sidebar-icon"><i class="fas fa-search"></i></div>
+            <div class="sidebar-icon"><i class="fas fa-search-plus"></i></div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <!-- Canvas Area -->
+            <div class="canvas-area">
+                <div class="canvas-header">
+                    <div class="canvas-title"><i class="fas fa-cube"></i> Cabinet</div>
+                    <div class="canvas-actions">
+                        <button class="action-btn">Quick start</button>
+                        <button class="action-btn primary">Do it for me</button>
+                        <button class="action-btn" id="pdfButton">PDF →</button>
+                        <button class="action-btn">Details</button>
+                    </div>
+                </div>
+                <div class="cabinet-container" id="cabinetContainer">
+                    <div class="quick-start" id="quickStart">
+                        <div class="quick-start-text">Quick start</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Properties Panel -->
+            <div class="properties-panel">
+                <div class="properties-header">
+                    <div class="properties-title">Properties</div>
+                    <button class="filter-btn">Population Filters</button>
+                </div>
+                
+                <div class="properties-content">
+                    <div class="property-group">
+                        <div class="property-row">
+                            <div class="property-label">Layout Type</div>
+                            <div class="property-value">
+                                <select class="property-select">
+                                    <option>Face Lit</option>
+                                    <option>Back Lit</option>
+                                    <option>Edge Lit</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Shape</div>
+                            <div class="property-value">
+                                <select class="property-select">
+                                    <option>Rectangle</option>
+                                    <option>Circle</option>
+                                    <option>Custom</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Cap Depth</div>
+                            <div class="property-value">
+                                <div class="input-with-unit">
+                                    <input type="number" class="property-input" id="cabinetDepth" value="4">
+                                    <span class="unit-suffix">in</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Height</div>
+                            <div class="property-value">
+                                <div class="input-with-unit">
+                                    <input type="number" class="property-input" id="cabinetHeight" value="48">
+                                    <span class="unit-suffix">in</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Width</div>
+                            <div class="property-value">
+                                <div class="input-with-unit">
+                                    <input type="number" class="property-input" id="cabinetWidth" value="96">
+                                    <span class="unit-suffix">in</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Module Spacing</div>
+                            <div class="property-value">
+                                <div class="input-with-unit">
+                                    <input type="number" class="property-input" id="moduleSpacing" value="8">
+                                    <span class="unit-suffix">in</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Row Spacing</div>
+                            <div class="property-value">
+                                <div class="input-with-unit">
+                                    <input type="number" class="property-input" id="rowSpacing" value="10">
+                                    <span class="unit-suffix">in</span>
+                                </div>
+                            </div>
+                        </div>
+                         <div class="property-row">
+                            <div class="property-label">Module</div>
+                            <div class="property-value">
+                                <select class="property-select" id="moduleSelect">
+                                    <option>QUAD PRO XW 1.5W,3 LED,36V,IP67</option>
+<option>QUAD PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>QUAD PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>QUAD PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>QUAD PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>QUAD MAX PRO HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX PRO HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX PRO MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX PRO MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX PRO IW 3LED,1W,36V,IP67</option>
+<option>QUAD MAX PRO IW 3LED,1W,36V,IP67</option>
+<option>QUAD MAX PRO IW 3LED,1.5W,36V,IP67</option>
+<option>QUAD MAX PRO IW 3LED,1.5W,36V,IP67</option>
+<option>QUAD MAX XW 3LED,1.5W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67</option>
+<option>QUAD MAX HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 2LED,1.2W,36V,IP67</option>
+<option>QUAD  MAX HW 2LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 2LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 2LED,1.2W,36V,IP67</option>
+<option>QUAD MAX LW 1 LED 0.48W,36V,IP67</option>
+<option>QUAD MAX' LW 1 LED 0.48W,36V,IP67</option>
+<option>QUAD MAX LW 1 LED 0.72W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX HW 3LED,1.2W,36V,IP67</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 BX</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 BX</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 CL</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 CL</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 ML</option>
+<option>QUAD MAX MW 3LED,0.72W,36V,IP67 ML</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE MW 0.72W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>QUAD LINE HW 1.2W,36V,IP66</option>
+<option>ECO PRO XW 1.5W,3 LED,36V,IP67</option>
+<option>ECO PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>ECO PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>ECO PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>ECO PRO HW 1.2W,3 LED,36V,IP67</option>
+<option>ECO PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>ECO PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>ECO PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>ECO PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>ECO PRO MW 0.72W 3 LED,36V,IP67</option>
+<option>ECO MAX MW 12V 1.2W,12V,IP66</option>
+<option>ECO MAX MW 12V 1.2W,12V,IP66</option>
+<option>ECO MAX MW 12V0.72W,12V,IP66</option>
+<option>ECO MAX MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE HW 12V 1.2W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE MW 12V0.72W,12V,IP66</option>
+<option>ECO LINE HW 12V1.2W,12V,IP66</option>
+                    <option>ECO LINE HW 12V1.2W,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V MW ,0.72W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V HW 1.2W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V XW ,1.5W 3 LED,12V,IP66</option>
+                    <option>EQ LED 12V XW ,1.5W 3 LED,12V,IP66</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="property-row">
+                            <div class="property-label">Power Supply</div>
+                            <div class="property-value">
+                                <select class="property-select" id="powerSupplySelect">
+                                    <option value="quad-line-36v-60w">Quad line 36V 60W</option>
+                                    <option value="quad-line-36v-100w">Quad line 36V 100W</option>
+                                    <option value="quad-line-36v-150w">Quad line 36V 150W</option>
+                                    <option value="quad-line-36v-240w">Quad line 36V 240W</option>
+                                    <option value="quad-eco-12v-60w">Quad Eco Series 12V 60W</option>
+                                    <option value="quad-eco-12v-120w">Quad Eco Series 12V 120W</option>
+                                    <option value="quad-eco-12v-250w">Quad Eco Series 12V 250W</option>
+                                    <option value="quad-pro-36v-60w">Quad pro 36V 60W</option>
+                                    <option value="quad-pro-36v-150w">Quad pro 36V 150W</option>
+                                    <option value="quad-pro-36v-240w">Quad pro 36V 240W</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="properties-footer">
+                    <button class="footer-btn populate">Populate</button>
+                    <button class="footer-btn clear">Clear</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM Element References ---
+            const cabinetContainer = document.getElementById('cabinetContainer');
+            const quickStart = document.getElementById('quickStart');
+            const heightInput = document.getElementById('cabinetHeight');
+            const widthInput = document.getElementById('cabinetWidth');
+            const depthInput = document.getElementById('cabinetDepth');
+            const moduleSpacingInput = document.getElementById('moduleSpacing');
+            const rowSpacingInput = document.getElementById('rowSpacing');
+
+            // --- Event Listeners ---
+
+            // Tab switching
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.addEventListener('click', e => {
+                    const href = e.currentTarget.getAttribute('href') || '#';
+                    // Only prevent default for in-page tabs (e.g., '#'). Allow real links to navigate.
+                    if (href === '#' || href.startsWith('#')) {
+                        e.preventDefault();
+                        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                        e.currentTarget.classList.add('active');
+                    }
+                });
+            });
+
+            // Sidebar icon switching
+            document.querySelectorAll('.sidebar-icon').forEach(icon => {
+                icon.addEventListener('click', e => {
+                    document.querySelectorAll('.sidebar-icon').forEach(i => i.classList.remove('active'));
+                    e.currentTarget.classList.add('active');
+                });
+            });
+
+            // Unit toggle
+            document.querySelectorAll('input[name="units"]').forEach(radio => {
+                radio.addEventListener('change', e => {
+                    const units = e.currentTarget.value === 'imperial' ? 'in' : 'cm';
+                    document.querySelectorAll('.unit-suffix').forEach(suffix => {
+                        if (suffix.textContent === 'in' || suffix.textContent === 'cm') {
+                            suffix.textContent = units;
+                        }
+                    });
+                });
+            });
+
+            // Populate button
+            document.querySelector('.footer-btn.populate').addEventListener('click', generateLEDLayout);
+
+            // Clear button
+            document.querySelector('.footer-btn.clear').addEventListener('click', () => {
+                // Removed the confirm() dialog as it's not ideal.
+                heightInput.value = '48';
+                widthInput.value = '96';
+                depthInput.value = '4';
+                moduleSpacingInput.value = '8';
+                rowSpacingInput.value = '10';
+                
+                // Reset power supply selection
+                document.getElementById('powerSupplySelect').value = 'quad-line-36v-60w';
+                
+                document.querySelectorAll('.property-input').forEach(input => {
+                    if (input.type === 'number' && ![heightInput.id, widthInput.id, depthInput.id, moduleSpacingInput.id, rowSpacingInput.id].includes(input.id)) {
+                        input.value = '0';
+                    }
+                });
+                clearCabinetVisualization();
+            });
+            
+            // Auto-recalculate on input change (with debouncing)
+            let debounceTimer;
+            [heightInput, widthInput, moduleSpacingInput, rowSpacingInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    clearTimeout(debounceTimer);
+                    if (cabinetContainer.style.display !== 'none' && !quickStart.isConnected) {
+                         debounceTimer = setTimeout(generateLEDLayout, 500);
+                    }
+                    updateCalculationPreview();
+                });
+            });
+            
+            // Update preview when power supply changes
+            document.getElementById('powerSupplySelect').addEventListener('change', updateCalculationPreview);
+
+            // PDF generation
+            document.getElementById('pdfButton').addEventListener('click', async (e) => {
+                e.preventDefault();
+                console.log('PDF button clicked');
+                try {
+                    await generatePDF();
+                } catch (error) {
+                    console.error('PDF generation error:', error);
+                    alert('Failed to generate PDF. Please check the console for details.');
+                }
+            });
+
+
+            // --- Core Functions ---
+
+            /**
+             * Gets power supply details from the selected option
+             */
+            function getPowerSupplyDetails(powerSupplyValue) {
+                const powerSupplyOptions = {
+                    'quad-line-36v-60w': { name: 'Quad line 36V 60W', wattage: 60 },
+                    'quad-line-36v-100w': { name: 'Quad line 36V 100W', wattage: 100 },
+                    'quad-line-36v-150w': { name: 'Quad line 36V 150W', wattage: 150 },
+                    'quad-line-36v-240w': { name: 'Quad line 36V 240W', wattage: 240 },
+                    'quad-eco-12v-60w': { name: 'Quad Eco Series 12V 60W', wattage: 60 },
+                    'quad-eco-12v-120w': { name: 'Quad Eco Series 12V 120W', wattage: 120 },
+                    'quad-eco-12v-250w': { name: 'Quad Eco Series 12V 250W', wattage: 250 },
+                    'quad-pro-36v-60w': { name: 'Quad pro 36V 60W', wattage: 60 },
+                    'quad-pro-36v-150w': { name: 'Quad pro 36V 150W', wattage: 150 },
+                    'quad-pro-36v-240w': { name: 'Quad pro 36V 240W', wattage: 240 }
+                };
+                
+                return powerSupplyOptions[powerSupplyValue] || { name: 'Quad line 36V 60W', wattage: 60 };
+            }
+
+            /**
+             * Calculates the number of power supplies needed
+             */
+            function calculatePowerSupplyQuantity(totalPower, powerSupplyWattage) {
+                if (totalPower <= 0 || powerSupplyWattage <= 0) return 0;
+                
+                // Add 20% safety margin for power supply calculations
+                const powerWithMargin = totalPower * 1.2;
+                return Math.ceil(powerWithMargin / powerSupplyWattage);
+            }
+
+            /**
+             * Generates and displays the LED cabinet visualization based on user inputs.
+             * This function now correctly uses separate horizontal and vertical spacing.
+             */
+            function generateLEDLayout() {
+                // Get dimensions and spacing from input fields
+                const height = parseFloat(heightInput.value) || 48;
+                const width = parseFloat(widthInput.value) || 96;
+                const depth = parseFloat(depthInput.value) || 4;
+                const horizontalSpacing = parseFloat(moduleSpacingInput.value) || 8;
+                const verticalSpacing = parseFloat(rowSpacingInput.value) || 10;
+                
+                // Calculate area
+                const areaInSqFt = (height * width) / 144;
+                
+                // Clear any existing content
+                cabinetContainer.innerHTML = ''; 
+                
+                // Check if dimensions are large enough for at least one module
+                if (width < horizontalSpacing || height < verticalSpacing) {
+                    cabinetContainer.innerHTML = '<div class="quick-start-text" style="color: #d9534f;">Dimensions too small for selected spacing.</div>';
+                    return;
+                }
+
+                // Calculate the grid based on individual spacing values
+                const modulesPerRow = Math.floor(width / horizontalSpacing);
+                const rowsNeeded = Math.floor(height / verticalSpacing);
+                const totalModules = modulesPerRow * rowsNeeded;
+                const actualDensity = totalModules > 0 ? (totalModules / areaInSqFt) : 0;
+                
+                // Calculate scale factor to fit the cabinet visualization in the available container space
+                const containerWidth = cabinetContainer.clientWidth - 80; // Add padding
+                const containerHeight = cabinetContainer.clientHeight - 80; // Add padding
+                const scaleX = containerWidth / width;
+                const scaleY = containerHeight / height;
+                const scale = Math.min(scaleX, scaleY, 8); // Limit max scale to 8
+                
+                // Create the main cabinet box element
+                const cabinetBox = document.createElement('div');
+                cabinetBox.className = 'cabinet-box';
+                cabinetBox.style.width = (width * scale) + 'px';
+                cabinetBox.style.height = (height * scale) + 'px';
+                
+                // Add top informational label
+                const cabinetInfo = document.createElement('div');
+                cabinetInfo.className = 'cabinet-info';
+                cabinetInfo.innerHTML = `Cabinet: ${width}" × ${height}" × ${depth}" | Area: ${areaInSqFt.toFixed(1)} sq ft`;
+                cabinetBox.appendChild(cabinetInfo);
+                
+                // Add bottom informational label
+                const moduleCount = document.createElement('div');
+                moduleCount.className = 'module-count';
+                moduleCount.innerHTML = `${totalModules} Modules | ${rowsNeeded} Rows × ${modulesPerRow} Cols | Density: ${actualDensity.toFixed(1)}/sq ft`;
+                cabinetBox.appendChild(moduleCount);
+                
+                                 console.log(`Grid: ${rowsNeeded} rows x ${modulesPerRow} cols | Spacing: ${horizontalSpacing}"H x ${verticalSpacing}"V`);
+
+                 // Calculate proper starting positions to ensure even spacing from edges
+                 const totalGridWidth = (modulesPerRow - 1) * horizontalSpacing;
+                 const totalGridHeight = (rowsNeeded - 1) * verticalSpacing;
+                 const startOffsetX = (width - totalGridWidth) / 2;
+                 const startOffsetY = (height - totalGridHeight) / 2;
+
+                 // PERFECT GRID POSITIONING with centered alignment
+                 for (let row = 0; row < rowsNeeded; row++) {
+                     const moduleY = startOffsetY + (row * verticalSpacing);
+                     const rowY_pixels = Math.round(moduleY * scale) - 4;
+                     
+                     for (let col = 0; col < modulesPerRow; col++) {
+                         const moduleX = startOffsetX + (col * horizontalSpacing);
+                         const colX_pixels = Math.round(moduleX * scale) - 10;
+                         
+                         const moduleNumber = (row * modulesPerRow) + col + 1;
+                         const module = document.createElement('div');
+                         module.className = 'led-module';
+                         
+                         // Set EXACT pixel positions - guarantees straight lines
+                         module.style.left = colX_pixels + 'px';
+                         module.style.top = rowY_pixels + 'px';
+                        
+                        // Add middle LED chip for visual detail
+                        const middleChip = document.createElement('div');
+                        middleChip.className = 'led-chip-middle';
+                        module.appendChild(middleChip);
+                        
+                        // Add connection points for visual detail
+                        const leftConnector = document.createElement('div');
+                        leftConnector.className = 'led-module-connector left';
+                        module.appendChild(leftConnector);
+                        
+                        const rightConnector = document.createElement('div');
+                        rightConnector.className = 'led-module-connector right';
+                        module.appendChild(rightConnector);
+                        
+                                                 // Add a detailed tooltip on hover with actual positions
+                         const posX = (startOffsetX + (col * horizontalSpacing)).toFixed(1);
+                         const posY = (startOffsetY + (row * verticalSpacing)).toFixed(1);
+                         module.title = `Module #${moduleNumber}\nPosition: ${posX}", ${posY}"\nGrid: R${row + 1}, C${col + 1}`;
+                        
+                        cabinetBox.appendChild(module);
+                    }
+                }
+                
+                cabinetContainer.appendChild(cabinetBox);
+                console.log(`Generated ${totalModules} LED modules.`);
+            }
+
+            /**
+             * Clears the cabinet visualization and shows the initial "Quick start" message.
+             */
+            function clearCabinetVisualization() {
+                cabinetContainer.innerHTML = ''; // Clear content
+                cabinetContainer.appendChild(quickStart); // Add back the quick start message
+                updateCalculationPreview(); // Update preview text
+                console.log('Cabinet visualization cleared');
+            }
+            
+            /**
+             * Updates the preview text in the "Quick start" area without generating the full visual.
+             */
+            function updateCalculationPreview() {
+                if (!quickStart.isConnected) return; // Only update if quick start is visible
+
+                const height = parseFloat(heightInput.value) || 0;
+                const width = parseFloat(widthInput.value) || 0;
+                const horizontalSpacing = parseFloat(moduleSpacingInput.value) || 1;
+                const verticalSpacing = parseFloat(rowSpacingInput.value) || 1;
+                const areaInSqFt = (height * width) / 144;
+
+                const modulesPerRow = Math.floor(width / horizontalSpacing);
+                const rowsNeeded = Math.floor(height / verticalSpacing);
+                const totalModules = modulesPerRow * rowsNeeded;
+                const actualDensity = totalModules > 0 ? (totalModules / areaInSqFt) : 0;
+                const totalPower = totalModules * 0.72;
+                
+                // Get power supply info
+                const selectedPowerSupply = document.getElementById('powerSupplySelect').value || 'quad-line-36v-60w';
+                const powerSupplyDetails = getPowerSupplyDetails(selectedPowerSupply);
+                const powerSupplyQuantity = calculatePowerSupplyQuantity(totalPower, powerSupplyDetails.wattage);
+                
+                const quickStartText = document.querySelector('.quick-start-text');
+                quickStartText.innerHTML = `Quick start<br><small style="color: #999;">Preview: ${width}" × ${height}" | ${totalModules} modules (${rowsNeeded}×${modulesPerRow} grid) | ${actualDensity.toFixed(1)} per sq ft | ${powerSupplyQuantity} power supplies</small>`;
+            }
+
+                         /**
+              * Creates a simple programmatic logo as base64 data
+              */
+             function createFallbackLogo() {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 200;
+                    canvas.height = 80;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Create gradient background
+                    const gradient = ctx.createLinearGradient(0, 0, 200, 0);
+                    gradient.addColorStop(0, '#2E5BBA');
+                    gradient.addColorStop(0.5, '#1BCED6');
+                    gradient.addColorStop(1, '#33426C');
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, 200, 80);
+                    
+                    // Add text
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 32px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Qwatt', 100, 50);
+                    
+                    return canvas.toDataURL('image/jpeg', 0.9);
+                } catch (error) {
+                    console.error('Error creating fallback logo:', error);
+                    return null;
+                }
+             }
+
+             /**
+              * Loads the logo image and returns a promise with the base64 data
+              */
+             function loadLogo() {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    
+                    // Add CORS settings for local files
+                    img.crossOrigin = 'anonymous';
+                    
+                    img.onload = function() {
+                        try {
+                            console.log('Logo image loaded, dimensions:', img.width, 'x', img.height);
+                            
+                            // Create a canvas and draw the image onto it
+                            const canvas = document.createElement('canvas');
+                            canvas.width = img.width;
+                            canvas.height = img.height;
+                            const ctx = canvas.getContext('2d');
+                            
+                            // Fill white background first (in case of transparent PNG)
+                            ctx.fillStyle = 'white';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            
+                            // Draw the image
+                            ctx.drawImage(img, 0, 0);
+                            
+                            // Convert to base64 with higher quality
+                            const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+                            console.log('Logo converted to base64, length:', dataURL.length);
+                            resolve(dataURL);
+                        } catch (error) {
+                            console.error('Error processing logo:', error);
+                            resolve(null);
+                        }
+                    };
+                    
+                    img.onerror = function(error) {
+                        console.error('Logo file not found or could not be loaded:', error);
+                        console.log('Trying alternative logo paths...');
+                        
+                        // Try alternative paths
+                        const altPaths = [
+                            '/wp-content/uploads/2025/07/logo.jpeg',
+                            './logo.jpg',
+                            '/logo.jpg',
+                            'logo.png',
+                            './logo.png'
+                        ];
+                        let pathIndex = 0;
+                        
+                                                 function tryNextPath() {
+                             if (pathIndex >= altPaths.length) {
+                                 console.warn('All logo paths failed, creating programmatic logo');
+                                 const fallbackLogo = createFallbackLogo();
+                                 resolve(fallbackLogo);
+                                 return;
+                             }
+                            
+                            const altImg = new Image();
+                            altImg.crossOrigin = 'anonymous';
+                            altImg.onload = function() {
+                                try {
+                                    const canvas = document.createElement('canvas');
+                                    canvas.width = altImg.width;
+                                    canvas.height = altImg.height;
+                                    const ctx = canvas.getContext('2d');
+                                    ctx.fillStyle = 'white';
+                                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                                    ctx.drawImage(altImg, 0, 0);
+                                    const dataURL = canvas.toDataURL('image/jpeg', 0.9);
+                                    console.log('Alternative logo loaded from:', altPaths[pathIndex]);
+                                    resolve(dataURL);
+                                } catch (error) {
+                                    console.error('Error processing alternative logo:', error);
+                                    resolve(null);
+                                }
+                            };
+                            altImg.onerror = function() {
+                                console.log('Alternative path failed:', altPaths[pathIndex]);
+                                pathIndex++;
+                                tryNextPath();
+                            };
+                            altImg.src = altPaths[pathIndex];
+                        }
+                        
+                        tryNextPath();
+                    };
+                    
+                                         // Set timeout
+                     setTimeout(() => {
+                         console.warn('Logo loading timeout, creating programmatic logo');
+                         const fallbackLogo = createFallbackLogo();
+                         resolve(fallbackLogo);
+                     }, 5000);
+                    
+                    // Try to load the logo
+                    console.log('Attempting to load logo from: logo.jpg');
+                    img.src = '/wp-content/uploads/2025/07/logo.jpeg';
+                });
+             }
+
+             /**
+              * Generates a comprehensive PDF with LED layout visualization and specifications.
+              */
+             async function generatePDF() {
+                 console.log('PDF generation started');
+                 
+                 // Load logo first before proceeding
+                 const logoData = await loadLogo();
+                 console.log('Logo loading status:', logoData ? 'success' : 'failed');
+
+                 console.log('Checking jsPDF library...');
+                 console.log('window.jspdf:', typeof window.jspdf);
+                 console.log('window:', Object.keys(window).filter(key => key.toLowerCase().includes('pdf')));
+                                 function replaceGeneratePDF() {
+                    let oldString = `async function generatePDF() {
+                                 console.log('PDF generation started');
+                                 
+                                 console.log('Checking jsPDF library...');
+                                 console.log('window.jspdf:', typeof window.jspdf);
+                                 console.log('window:', Object.keys(window).filter(key => key.toLowerCase().includes('pdf')));`;
+                
+                    let newString = `async function generatePDF() {
+                                 console.log('PDF generation started');
+                                 
+                                 // Load logo first before proceeding
+                                 const logoData = await loadLogo();
+                                 console.log('Logo loading status:', logoData ? 'success' : 'failed');
+                
+                                 console.log('Checking jsPDF library...');
+                                 console.log('window.jspdf:', typeof window.jspdf);
+                                 console.log('window:', Object.keys(window).filter(key => key.toLowerCase().includes('pdf')));`;
+                }
+                 if (typeof window.jspdf === 'undefined') {
+                     console.error('jsPDF library not found');
+                     alert('PDF library (jsPDF) is not loaded. Please check your connection and refresh.');
+                     return;
+                 }
+                 
+                 if (quickStart.isConnected) {
+                     console.log('Cabinet not populated yet');
+                     alert('Please populate the cabinet first by clicking the "Populate" button.');
+                     return;
+                 }
+
+                 try {
+                     console.log('Starting PDF generation process...');
+                     
+                     const { jsPDF } = window.jspdf;
+                     console.log('jsPDF library loaded successfully');
+                     
+                     const doc = new jsPDF('landscape', 'mm', 'a4');
+                     console.log('PDF document created');
+                     
+                     // Get current values with validation
+                     const height = parseFloat(heightInput.value) || 48;
+                     const width = parseFloat(widthInput.value) || 96;
+                     const depth = parseFloat(depthInput.value) || 4;
+                     const horizontalSpacing = parseFloat(moduleSpacingInput.value) || 8;
+                     const verticalSpacing = parseFloat(rowSpacingInput.value) || 10;
+                     const selectedModule = document.getElementById('moduleSelect').value || 'Qwatt MAX 24V Small 71K';
+                     const selectedPowerSupply = document.getElementById('powerSupplySelect').value || 'quad-line-36v-60w';
+                     
+                     console.log(`Cabinet: ${width}" × ${height}" × ${depth}", Spacing: ${horizontalSpacing}" × ${verticalSpacing}"`);
+                     
+                     // Calculate layout metrics
+                     const areaInSqFt = (height * width) / 144;
+                     const modulesPerRow = Math.floor(width / horizontalSpacing);
+                     const rowsNeeded = Math.floor(height / verticalSpacing);
+                     const totalModules = modulesPerRow * rowsNeeded;
+                     const density = totalModules / areaInSqFt;
+                     const totalPower = totalModules * 0.72; // 0.72W per module
+                     
+                     // Calculate power supply requirements
+                     const powerSupplyDetails = getPowerSupplyDetails(selectedPowerSupply);
+                     const powerSupplyQuantity = calculatePowerSupplyQuantity(totalPower, powerSupplyDetails.wattage);
+                     const totalPowerSupplyCapacity = powerSupplyQuantity * powerSupplyDetails.wattage;
+                     
+                     console.log(`Grid: ${rowsNeeded} rows × ${modulesPerRow} cols = ${totalModules} modules`);
+                     console.log(`Power Supply: ${powerSupplyDetails.name} × ${powerSupplyQuantity} units = ${totalPowerSupplyCapacity}W capacity`);
+                     
+                     // PDF page dimensions
+                     const pageWidth = doc.internal.pageSize.getWidth();
+                     const pageHeight = doc.internal.pageSize.getHeight();
+                     console.log(`PDF page size: ${pageWidth} × ${pageHeight} mm`);
+                     
+                     // --- HEADER ---
+                     doc.setFillColor(51, 51, 51);
+                     doc.rect(0, 0, pageWidth, 20, 'F');
+                     doc.setTextColor(255, 255, 255);
+                     
+                     doc.setFontSize(16);
+                     doc.setFont('helvetica', 'bold');
+                     doc.text('QWATT LED CABINET LAYOUT SPECIFICATION', 15, 13);
+                     doc.setFontSize(10);
+                     doc.text(`Generated: ${new Date().toLocaleDateString('en-US')} ${new Date().toLocaleTimeString('en-US')}`, pageWidth - 60, 13);
+                     
+                     // Reset text color
+                     doc.setTextColor(0, 0, 0);
+                     
+                     // Add the logo - we should always have one now (either real or programmatic)
+                     if (logoData) {
+                         try {
+                             // Position the logo on the right side just below the header
+                             doc.addImage(logoData, 'JPEG', pageWidth - 70, 20, 60, 30);
+                             console.log('Logo added to PDF successfully');
+                         } catch (logoError) {
+                             console.warn('Failed to add logo image:', logoError);
+                             console.error(logoError);
+                             // Final text fallback if everything fails
+                             doc.setFontSize(12);
+                             doc.setFont('helvetica', 'bold');
+                             doc.setTextColor(0, 0, 0); // Changed to black since it's not on the header anymore
+                             doc.text('QWATT', pageWidth - 35, 35);
+                         }
+                     } else {
+                         console.error('No logo data available - this should not happen with fallback');
+                         // Final text-based logo fallback
+                         doc.setFontSize(12);
+                         doc.setFont('helvetica', 'bold');
+                         doc.setTextColor(0, 0, 0); // Changed to black since it's not on the header anymore
+                         doc.text('QWATT', pageWidth - 35, 35);
+                     }
+                     
+                     // --- LED LAYOUT VISUALIZATION (MOVED TO TOP, BIGGER) ---
+                     let yPos = 30;
+                     doc.setFontSize(16);
+                     doc.setFont('helvetica', 'bold');
+                     doc.text('LED Module Layout Diagram', 15, yPos);
+                     
+                     // Calculate drawing area (optimized for table space)
+                     const drawingStartX = 15;
+                     const drawingStartY = yPos + 15;
+                     const maxDrawingWidth = pageWidth - 30; // Full width with margins
+                     const maxDrawingHeight = 60; // Further reduced height to ensure table fits
+                     
+                     // Scale the cabinet to fit in the drawing area
+                     const scaleX = maxDrawingWidth / width;
+                     const scaleY = maxDrawingHeight / height;
+                     const scale = Math.min(scaleX, scaleY, 2);
+                     
+                     const cabinetWidthPDF = width * scale;
+                     const cabinetHeightPDF = height * scale;
+                     
+                     console.log(`Drawing scale: ${scale.toFixed(3)}, Cabinet PDF size: ${cabinetWidthPDF.toFixed(1)} × ${cabinetHeightPDF.toFixed(1)} mm`);
+                     
+                     // Draw cabinet outline
+                     doc.setDrawColor(0, 0, 0);
+                     doc.setLineWidth(1);
+                     doc.rect(drawingStartX, drawingStartY, cabinetWidthPDF, cabinetHeightPDF);
+                     
+                     // Draw LED modules with proper spacing alignment
+                     doc.setDrawColor(100, 100, 100);
+                     doc.setLineWidth(0.3);
+                     
+                     let moduleCount = 0;
+                     
+                     // Calculate proper starting positions to ensure even spacing from edges
+                     const totalGridWidth = (modulesPerRow - 1) * horizontalSpacing;
+                     const totalGridHeight = (rowsNeeded - 1) * verticalSpacing;
+                     const startOffsetX = (width - totalGridWidth) / 2;
+                     const startOffsetY = (height - totalGridHeight) / 2;
+                     
+                     for (let row = 0; row < rowsNeeded; row++) {
+                         const moduleY = startOffsetY + (row * verticalSpacing);
+                         const rowY_pdf = drawingStartY + (moduleY * scale) - 1;
+                         
+                         for (let col = 0; col < modulesPerRow; col++) {
+                             const moduleX = startOffsetX + (col * horizontalSpacing);
+                             const colX_pdf = drawingStartX + (moduleX * scale) - 2.5;
+                             
+                             // Draw module housing as dark rectangle
+                             doc.setFillColor(40, 40, 40);
+                             doc.rect(colX_pdf, rowY_pdf, 5, 2, 'FD');
+                             
+                             // Draw 3 LED dots inside the module
+                             doc.setFillColor(0, 150, 255);
+                             const dotSize = 0.4;
+                             const dotSpacing = 1.3;
+                             const firstDotX = colX_pdf + 0.7;
+                             
+                             // Left dot
+                             doc.circle(firstDotX, rowY_pdf + 1, dotSize, 'F');
+                             // Center dot
+                             doc.circle(firstDotX + dotSpacing, rowY_pdf + 1, dotSize, 'F');
+                             // Right dot
+                             doc.circle(firstDotX + (dotSpacing * 2), rowY_pdf + 1, dotSize, 'F');
+                             
+                             moduleCount++;
+                         }
+                     }
+                     
+                     console.log(`Drew ${moduleCount} modules in PDF`);
+                     
+                     // Add dimension lines
+                     doc.setDrawColor(255, 0, 0);
+                     doc.setLineWidth(0.5);
+                     
+                     // Width dimension
+                     const dimY = drawingStartY + cabinetHeightPDF + 6;
+                     doc.line(drawingStartX, dimY, drawingStartX + cabinetWidthPDF, dimY);
+                     doc.line(drawingStartX, dimY - 2, drawingStartX, dimY + 2);
+                     doc.line(drawingStartX + cabinetWidthPDF, dimY - 2, drawingStartX + cabinetWidthPDF, dimY + 2);
+                     doc.setFontSize(8);
+                     doc.setTextColor(255, 0, 0);
+                     doc.text(`${width}"`, drawingStartX + cabinetWidthPDF/2 - 5, dimY + 4);
+                     
+                     // Height dimension
+                     const dimX = drawingStartX + cabinetWidthPDF + 6;
+                     doc.line(dimX, drawingStartY, dimX, drawingStartY + cabinetHeightPDF);
+                     doc.line(dimX - 2, drawingStartY, dimX + 2, drawingStartY);
+                     doc.line(dimX - 2, drawingStartY + cabinetHeightPDF, dimX + 2, drawingStartY + cabinetHeightPDF);
+                     doc.text(`${height}"`, dimX + 3, drawingStartY + cabinetHeightPDF/2);
+                     
+                     // Reset text color
+                     doc.setTextColor(0, 0, 0);
+                     
+                     console.log('Layout diagram completed');
+                     
+                     // --- CABINET SPECIFICATIONS TABLE (MOVED TO BOTTOM) ---
+                     const tableStartYBottom = drawingStartY + cabinetHeightPDF + 18;
+                     doc.setFontSize(14);
+                     doc.setFont('helvetica', 'bold');
+                     doc.text('Cabinet Specifications', 15, tableStartYBottom);
+                     
+                     // Table specifications - split into two columns for better fit
+                     const tableDataLeft = [
+                         ['Cabinet Dimensions', `${width}" W × ${height}" H × ${depth}" D`],
+                         ['Total Cabinet Area', `${areaInSqFt.toFixed(1)} square feet`],
+                         ['Module Type', selectedModule],
+                         ['Grid Configuration', `${rowsNeeded} rows × ${modulesPerRow} columns`],
+                         ['Total LED Modules', `${totalModules} modules`],
+                         ['Module Density', `${density.toFixed(2)} modules per square foot`]
+                     ];
+                     
+                     const tableDataRight = [
+                         ['Total Power Consumption', `${totalPower.toFixed(1)}W`],
+                         ['Power Supply Type', powerSupplyDetails.name],
+                         ['Power Supply Quantity', `${powerSupplyQuantity} units`],
+                         ['Total Power Supply Capacity', `${totalPowerSupplyCapacity}W`],
+                         ['Power Utilization', `${((totalPower / totalPowerSupplyCapacity) * 100).toFixed(1)}%`]
+                     ];
+                     
+                     console.log('Table data prepared:', tableDataLeft.length, 'left rows,', tableDataRight.length, 'right rows');
+                     
+                     // Draw two-column table at bottom
+                     const tableStartX = 15;
+                     const tableStartY = tableStartYBottom + 4;
+                     const colWidth1 = 58; // Label column width (more compact)
+                     const colWidth2 = 68; // Value column width (more compact)
+                     const tableGap = 6; // Gap between left and right tables
+                     const rightTableStartX = tableStartX + colWidth1 + colWidth2 + tableGap;
+                     const rowHeight = 4.5; // Very compact row height to fit all rows (including power supply rows)
+                     
+                     // Check if table will fit on the page
+                     const estimatedTableHeight = (Math.max(tableDataLeft.length, tableDataRight.length) + 1) * rowHeight;
+                     const availableSpace = pageHeight - tableStartYBottom - 20; // 20mm for footer
+                     const totalTableWidth = (colWidth1 + colWidth2) * 2 + tableGap;
+                     const availableWidth = pageWidth - 30; // 15mm margins on each side
+                     
+                     console.log(`Table height: ${estimatedTableHeight}mm, Available space: ${availableSpace}mm`);
+                     console.log(`Table width: ${totalTableWidth}mm, Available width: ${availableWidth}mm`);
+                     
+                     if (estimatedTableHeight > availableSpace) {
+                         console.warn('Table may not fit on page vertically, adjusting layout...');
+                     }
+                     
+                     if (totalTableWidth > availableWidth) {
+                         console.warn('Table may not fit on page horizontally, adjusting layout...');
+                     }
+                     
+                     // Function to draw a table section
+                     function drawTableSection(startX, tableData, headerText) {
+                         // Table header
+                         doc.setFillColor(240, 240, 240);
+                         doc.rect(startX, tableStartY, colWidth1 + colWidth2, rowHeight, 'F');
+                         doc.setDrawColor(0, 0, 0);
+                         doc.setLineWidth(0.5);
+                         doc.rect(startX, tableStartY, colWidth1 + colWidth2, rowHeight);
+                         
+                         doc.setFontSize(8);
+                         doc.setFont('helvetica', 'bold');
+                         doc.text('Specification', startX + 2, tableStartY + 3.5);
+                         doc.text('Value', startX + colWidth1 + 2, tableStartY + 3.5);
+                         
+                         let currentY = tableStartY + rowHeight;
+                         
+                         // Table rows
+                         doc.setFont('helvetica', 'normal');
+                         doc.setFontSize(7);
+                         tableData.forEach((row, index) => {
+                             console.log(`Processing table row ${index + 1}: ${row[0]} at Y position ${currentY}`);
+                             
+                             // Check if we have enough space for this row
+                             if (currentY + rowHeight > pageHeight - 20) {
+                                 console.warn(`Row ${index + 1} may be cut off - Y position: ${currentY}, page height: ${pageHeight}`);
+                             }
+                             
+                             // Alternate row colors
+                             if (index % 2 === 0) {
+                                 doc.setFillColor(250, 250, 250);
+                                 doc.rect(startX, currentY, colWidth1 + colWidth2, rowHeight, 'F');
+                             }
+                             
+                             // Draw borders
+                             doc.rect(startX, currentY, colWidth1, rowHeight);
+                             doc.rect(startX + colWidth1, currentY, colWidth2, rowHeight);
+                             
+                             // Add text
+                             doc.setFont('helvetica', 'bold');
+                             doc.text(row[0], startX + 2, currentY + 3.5);
+                             doc.setFont('helvetica', 'normal');
+                             doc.text(row[1], startX + colWidth1 + 2, currentY + 3.5);
+                             
+                             currentY += rowHeight;
+                         });
+                     }
+                     
+                     // Draw left table
+                     drawTableSection(tableStartX, tableDataLeft, 'Cabinet & Module Specifications');
+                     
+                     // Draw right table
+                     drawTableSection(rightTableStartX, tableDataRight, 'Power Specifications');
+                     
+                     console.log(`Specifications table added to bottom of PDF with ${tableDataLeft.length + tableDataRight.length} rows in two columns`);
+                     console.log(`Table ends at Y position: ${tableStartY + (Math.max(tableDataLeft.length, tableDataRight.length) + 1) * rowHeight}`);
+                     console.log(`Page height: ${pageHeight}`);
+                     
+                     // --- FOOTER ---
+                     doc.setFontSize(8);
+                     doc.setTextColor(100, 100, 100);
+                     doc.text('Generated by Qwatt LED Cabinet Designer | Professional LED Layout Tool', 15, pageHeight - 8);
+                     doc.text(`Project: ${width}×${height} Cabinet | ${totalModules} Modules | ${totalPower.toFixed(1)}W | ${powerSupplyQuantity}×${powerSupplyDetails.name}`, pageWidth - 150, pageHeight - 8);
+                     
+                     // --- SAVE PDF ---
+                     const timestamp = new Date().toISOString().slice(0,10);
+                     const filename = `Qwatt_LED_Layout_${width}x${height}_${totalModules}modules_${timestamp}.pdf`;
+                     
+                     console.log(`Saving PDF as: ${filename}`);
+                     doc.save(filename);
+                     
+                     console.log(`PDF generated successfully: ${filename}`);
+                     alert(`✅ PDF Downloaded Successfully!\n\nFile: ${filename}\n\nContains:\n• Cabinet specifications\n• ${totalModules} LED module layout\n• Module reference list\n• Power calculations`);
+                     
+                 } catch (error) {
+                     console.error('PDF Generation Error:', error);
+                     console.error('Error stack:', error.stack);
+                     alert(`PDF Generation Failed!\n\nError: ${error.message}\n\nPlease check the browser console for more details.\n\nTry:\n1. Refresh the page\n2. Check internet connection\n3. Use a different browser`);
+                 }
+             }
+
+
+            // --- Initial Setup ---
+            updateCalculationPreview(); // Show initial preview on load
+        });
+    </script>
+</body>
+</html>

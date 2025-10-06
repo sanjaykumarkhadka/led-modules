@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/opentype.js@latest/dist/opentype.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -100,8 +101,8 @@
                     <!-- Form will be loaded here -->
                 </div>
 
-                <!-- Text Input -->
-                <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+                <!-- Text Input - Channel Letter Tab -->
+                <div id="channelLetterInput" class="bg-white rounded-xl shadow-sm p-6 mb-6 tab-content">
                     <label for="yourText" class="block text-sm font-medium mb-2">Your Text (use Enter for new line, max 2 lines)</label>
                     <div class="flex space-x-3">
                         <textarea id="yourText" rows="2" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 resize-none" placeholder="Enter your text here...&#10;Second line (optional)">sanjay</textarea>
@@ -113,6 +114,123 @@
                                 <i class="fas fa-trash-alt mr-1"></i> Clear
                             </button>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Custom Artwork Input - Custom Artwork Tab -->
+                <div id="customArtworkInput" class="bg-white rounded-xl shadow-sm p-6 mb-6 tab-content hidden">
+                    <label class="block text-sm font-medium mb-4">Choose Input Method</label>
+
+                    <!-- Mode Selector -->
+                    <div class="flex space-x-4 mb-6">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="radio" name="artworkMode" value="file" class="mr-2" checked>
+                            <span class="text-sm font-medium">Upload File (PDF, EPS, SVG)</span>
+                        </label>
+                        <label class="flex items-center cursor-pointer">
+                            <input type="radio" name="artworkMode" value="text" class="mr-2">
+                            <span class="text-sm font-medium">Type Text (like Channel Letter)</span>
+                        </label>
+                    </div>
+
+                    <!-- Letter Dimensions Configuration -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-6 space-y-4">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">Letter Dimensions</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <!-- Height -->
+                            <div>
+                                <label for="artworkHeight" class="block text-xs font-medium text-gray-600 mb-1">Height per Letter</label>
+                                <div class="flex">
+                                    <input type="number" id="artworkHeight" min="1" step="0.1" value="35" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                    <span class="inline-flex items-center px-3 text-sm text-gray-700 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg" id="artworkHeightUnit">in</span>
+                                </div>
+                            </div>
+                            <!-- Width -->
+                            <div>
+                                <label for="artworkWidth" class="block text-xs font-medium text-gray-600 mb-1">Width per Letter</label>
+                                <div class="flex">
+                                    <input type="number" id="artworkWidth" min="1" step="0.1" value="25" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:ring-blue-500 focus:border-blue-500 text-sm">
+                                    <span class="inline-flex items-center px-3 text-sm text-gray-700 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg" id="artworkWidthUnit">in</span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- LED Module Lines -->
+                        <div>
+                            <label for="artworkLedLines" class="block text-xs font-medium text-gray-600 mb-1">Number of LED Module Lines per Letter</label>
+                            <input type="number" id="artworkLedLines" min="1" value="5" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm">
+                            <p class="text-xs text-gray-500 mt-1">Vertical lines of LED modules inside each letter</p>
+                        </div>
+                        <!-- Direct LED Count Override -->
+                        <div>
+                            <label for="artworkLedCount" class="block text-xs font-medium text-gray-600 mb-1">LEDs per Letter (Override)</label>
+                            <input type="number" id="artworkLedCount" min="1" placeholder="Auto-calculated" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-sm">
+                            <p class="text-xs text-gray-500 mt-1">Leave empty for auto-calculation, or enter specific number</p>
+                        </div>
+                    </div>
+
+                    <!-- File Upload Mode -->
+                    <div id="fileUploadMode" class="space-y-4">
+                        <!-- File Upload Area -->
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 transition cursor-pointer" id="dropZone">
+                            <i class="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-2"></i>
+                            <p class="text-gray-600 mb-2">Drag & drop your artwork file here or click to browse</p>
+                            <input type="file" id="artworkFile" accept=".pdf,.eps,.svg,application/pdf,application/postscript,image/svg+xml" class="hidden">
+                            <button type="button" id="browseBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+                                <i class="fas fa-folder-open mr-1"></i> Browse Files
+                            </button>
+                            <p class="text-xs text-gray-500 mt-2">Supported formats: PDF, EPS, SVG</p>
+                        </div>
+
+                        <!-- Uploaded File Info -->
+                        <div id="fileInfo" class="hidden bg-gray-50 rounded-lg p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-file-code text-blue-500 text-2xl"></i>
+                                    <div>
+                                        <p class="font-medium" id="fileName">filename.svg</p>
+                                        <p class="text-sm text-gray-500" id="fileSize">0 KB</p>
+                                    </div>
+                                </div>
+                                <button id="removeFile" class="text-red-500 hover:text-red-700">
+                                    <i class="fas fa-times-circle text-xl"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- LED Configuration for PDF/EPS -->
+                        <div id="manualLEDConfig" class="hidden bg-gray-50 rounded-lg p-4 space-y-3">
+                            <p class="text-sm font-medium text-gray-700">Specify LED Requirements:</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Number of Elements</label>
+                                    <input type="number" id="numElements" min="1" value="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">LEDs per Element</label>
+                                    <input type="number" id="ledsPerElement" min="1" value="50" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Element Names (comma-separated, optional)</label>
+                                <input type="text" id="elementNames" placeholder="e.g., MANUBHAI, JEWELLERS" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Text Input Mode -->
+                    <div id="textInputMode" class="space-y-4 hidden">
+                        <label for="artworkText" class="block text-sm font-medium">Your Text (use Enter for new line, max 2 lines)</label>
+                        <textarea id="artworkText" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 resize-none" placeholder="Enter your text here...&#10;Second line (optional)"></textarea>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex space-x-3 mt-4">
+                        <button id="populateArtworkBtn" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300 disabled:cursor-not-allowed" disabled>
+                            <i class="fas fa-play mr-1"></i> Populate
+                        </button>
+                        <button id="clearArtworkBtn" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">
+                            <i class="fas fa-trash-alt mr-1"></i> Clear
+                        </button>
                     </div>
                 </div>
 
