@@ -656,6 +656,9 @@ class LEDConfigurator {
             this.addArtworkDimensions(mainGroup, bbox);
 
             // Place LEDs on each element
+            const moduleSpacing = this.getModuleSpacing();
+            const strokeSpacing = this.getStrokeSpacing();
+
             this.state.artworkElements.forEach((artworkEl, index) => {
                 const outlinePath = artworkEl.element;
                 const shapeGroup = artworkEl.group;
@@ -664,7 +667,9 @@ class LEDConfigurator {
                     this.ledPlacer.placeLEDsInside(outlinePath, shapeGroup, ledCount, {
                         color: ledColor,
                         brightness: 100,
-                        effect: 'none'
+                        effect: 'none',
+                        moduleSpacing: moduleSpacing,
+                        strokeSpacing: strokeSpacing
                     });
 
                     // Add LED count display
@@ -1060,6 +1065,9 @@ class LEDConfigurator {
 
         // Now that all characters are in the DOM, place LEDs
         const ledColor = document.getElementById('ledColor').value;
+        const moduleSpacing = this.getModuleSpacing();
+        const strokeSpacing = this.getStrokeSpacing();
+
         document.querySelectorAll('.character-group').forEach(charGroup => {
             const outlinePath = charGroup.querySelector('.letter-outline');
             const char = charGroup.getAttribute('data-char');
@@ -1072,7 +1080,9 @@ class LEDConfigurator {
                 this.ledPlacer.placeLEDsInside(outlinePath, charGroup, charLedCount, {
                     color: ledColor,
                     brightness: 100,
-                    effect: 'none'
+                    effect: 'none',
+                    moduleSpacing: moduleSpacing,
+                    strokeSpacing: strokeSpacing
                 });
 
                 // Add LED count display below each character
@@ -1311,12 +1321,16 @@ class LEDConfigurator {
         // Recreate LEDs with new count
         const outlinePath = this.state.selectedCharGroup.querySelector('.letter-outline');
         const ledColor = '#888888'; // Fixed color like in example
+        const moduleSpacing = this.getModuleSpacing();
+        const strokeSpacing = this.getStrokeSpacing();
 
         if (outlinePath) {
             this.ledPlacer.placeLEDsInside(outlinePath, this.state.selectedCharGroup, newLedCount, {
                 color: ledColor,
                 brightness: 100,
-                effect: 'none'
+                effect: 'none',
+                moduleSpacing: moduleSpacing,
+                strokeSpacing: strokeSpacing
             });
         }
 
@@ -1406,9 +1420,20 @@ class LEDConfigurator {
     addHeightMeasurement(mainGroup, bbox) {
         const svgNS = "http://www.w3.org/2000/svg";
 
-        // Get the height input value
+        // Get the height input value and check units
         const heightInput = document.getElementById('height');
-        const heightValue = heightInput ? parseFloat(heightInput.value).toFixed(1) : "35.0";
+        const heightInInches = heightInput ? parseFloat(heightInput.value) : 35.0;
+        const isMetric = document.getElementById('unitToggle')?.checked || false;
+
+        // Convert to appropriate unit
+        let heightValue, unit;
+        if (isMetric) {
+            heightValue = (heightInInches * 25.4).toFixed(1); // Convert to mm
+            unit = 'mm';
+        } else {
+            heightValue = heightInInches.toFixed(1);
+            unit = '"'; // inch symbol
+        }
 
         // Create measurement group
         const measurementGroup = document.createElementNS(svgNS, "g");
@@ -1453,7 +1478,7 @@ class LEDConfigurator {
         heightText.setAttribute("font-size", "18");
         heightText.setAttribute("font-weight", "normal");
         heightText.setAttribute("fill", "#333");
-        heightText.textContent = `${heightValue}"`;
+        heightText.textContent = `${heightValue}${unit}`;
         measurementGroup.appendChild(heightText);
 
         mainGroup.appendChild(measurementGroup);
@@ -1604,22 +1629,35 @@ class LEDConfigurator {
         
         document.getElementById('modulesCount').textContent = totalModules;
         document.getElementById('strokeLength').textContent = `${perimeterValue} ${unit}`;
-        
+
         const powerRequiredValue = totalModules * selectedModule.wattsPerModule;
         document.getElementById('powerRequired').textContent = `${powerRequiredValue.toFixed(1)} W`;
-        
+
         const powerSuppliesNeeded = Math.ceil(powerRequiredValue / selectedPowerSupply.maxWatts);
         document.getElementById('powerSuppliesCount').textContent = powerSuppliesNeeded;
-        
+
+        // Calculate actual average spacing between modules
         const avgSpacing = totalModules > 0 ? (totalPerimeter * 12) / totalModules : 0;
-        const recommendedSpacingValue = document.getElementById('unitToggle').checked ? 
+        const recommendedSpacingValue = document.getElementById('unitToggle').checked ?
             (avgSpacing * 2.54).toFixed(1) : avgSpacing.toFixed(1);
         document.getElementById('recommendedSpacing').textContent = `${recommendedSpacingValue} ${unit}`;
-        
+
         const circuitLengthValue = totalPerimeter * 12 * 1.2;
-        const circuitLengthDisplay = document.getElementById('unitToggle').checked ? 
+        const circuitLengthDisplay = document.getElementById('unitToggle').checked ?
             (circuitLengthValue * 2.54).toFixed(1) : circuitLengthValue.toFixed(1);
         document.getElementById('circuitLength').textContent = `${circuitLengthDisplay} ${unit}`;
+    }
+
+    getModuleSpacing() {
+        // Get module spacing from input (in inches)
+        const moduleSpacingInput = document.getElementById('modulePitch');
+        return moduleSpacingInput ? parseFloat(moduleSpacingInput.value) : 8.0;
+    }
+
+    getStrokeSpacing() {
+        // Get stroke spacing from input (in inches)
+        const strokeSpacingInput = document.getElementById('strokeSpacing');
+        return strokeSpacingInput ? parseFloat(strokeSpacingInput.value) : 12.0;
     }
 
     // Transform methods
@@ -1717,9 +1755,9 @@ class LEDConfigurator {
         return 8.0 * letterHeightFeet;
     }
 
-    updateUnits() {
+    async updateUnits() {
         const isMetric = document.getElementById('unitToggle').checked;
-        const units = ['heightUnit', 'depthUnit', 'modulePitchUnit', 'artworkHeightUnit', 'artworkWidthUnit'];
+        const units = ['heightUnit', 'depthUnit', 'modulePitchUnit', 'strokeSpacingUnit', 'artworkHeightUnit', 'artworkWidthUnit'];
 
         units.forEach(id => {
             const element = document.getElementById(id);
@@ -1727,7 +1765,8 @@ class LEDConfigurator {
         });
 
         if (this.state.currentText) {
-            this.calculateResults();
+            // Re-render the text to update height measurement annotation
+            await this.renderText();
         }
     }
 

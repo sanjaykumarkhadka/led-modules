@@ -17,7 +17,9 @@ class LEDPlacer {
         const {
             color = '#666666',
             brightness = 100,
-            effect = 'none'
+            effect = 'none',
+            moduleSpacing = 8.0,      // Distance between LEDs along stroke (inches)
+            strokeSpacing = 12.0      // Distance between parallel rows (inches)
         } = options;
 
         console.log('placeLEDsInside called with:', { pathElement, charGroup, ledCount, options });
@@ -44,9 +46,10 @@ class LEDPlacer {
         const offsetDistance = Math.max(letterSize * 0.12, 10);
 
         console.log('LED inward offset:', offsetDistance);
+        console.log('Module spacing:', moduleSpacing, 'inches, Stroke spacing:', strokeSpacing, 'inches');
 
         // Place LEDs along the stroke path with inward offset
-        const leds = this.createStrokeDistributedLEDs(pathElement, charGroup, ledCount, offsetDistance);
+        const leds = this.createStrokeDistributedLEDs(pathElement, charGroup, ledCount, offsetDistance, moduleSpacing, strokeSpacing);
 
         console.log('Created LEDs:', leds);
 
@@ -63,8 +66,14 @@ class LEDPlacer {
     /**
      * Create LEDs distributed in the stroke band with proper spacing
      * Samples the stroke band area and ensures minimum spacing between LEDs
+     * @param {SVGPathElement} pathElement - The path outline
+     * @param {SVGGElement} charGroup - Character group
+     * @param {number} ledCount - Number of LEDs to place
+     * @param {number} offsetDistance - Base offset from path (pixels)
+     * @param {number} moduleSpacing - Distance between LEDs along stroke (inches)
+     * @param {number} strokeSpacing - Distance between parallel rows (inches)
      */
-    createStrokeDistributedLEDs(pathElement, charGroup, ledCount, offsetDistance) {
+    createStrokeDistributedLEDs(pathElement, charGroup, ledCount, offsetDistance, moduleSpacing = 8.0, strokeSpacing = 12.0) {
         const leds = [];
         const fillPath = charGroup.querySelector('.letter-fill') || pathElement;
         const bbox = pathElement.getBBox();
@@ -77,16 +86,26 @@ class LEDPlacer {
                 return leds;
             }
 
-            // Calculate minimum spacing between LEDs based on available area
+            // Convert module spacing from inches to pixels (approximate)
+            const pixelsPerInch = 96; // Standard screen DPI
+            const moduleSpacingPixels = moduleSpacing * pixelsPerInch;
+            const strokeSpacingPixels = strokeSpacing * pixelsPerInch;
+
+            // Calculate minimum spacing between LEDs based on module spacing
             const letterArea = bbox.width * bbox.height;
-            const minSpacing = Math.sqrt(letterArea / ledCount) * 0.5;
-            console.log('Minimum spacing between LEDs:', minSpacing);
+            const minSpacing = Math.min(moduleSpacingPixels * 0.8, Math.sqrt(letterArea / ledCount) * 0.5);
+            console.log('Minimum spacing between LEDs:', minSpacing, 'pixels (target:', moduleSpacingPixels, 'pixels)');
 
             // Generate many candidate positions along the path at various offsets
             const candidates = [];
             // Scale samples based on LED count - more LEDs need more candidates
             const samplesPerLED = Math.max(100, Math.min(300, ledCount * 5));
             const totalSamples = ledCount * samplesPerLED;
+
+            // Calculate number of parallel rows based on stroke spacing and letter size
+            const maxStrokeDepth = offsetDistance * 2;
+            const numRows = Math.max(1, Math.ceil(maxStrokeDepth / strokeSpacingPixels));
+            console.log('Placing LEDs in', numRows, 'parallel row(s), stroke spacing:', strokeSpacing, 'inches');
 
             for (let i = 0; i < totalSamples; i++) {
                 const distance = (pathLength * i) / totalSamples;
@@ -95,11 +114,11 @@ class LEDPlacer {
                     const point = pathElement.getPointAtLength(distance);
                     const normal = this.calculateNormal(pathElement, distance);
 
-                    // Try more offset distances for higher LED counts
-                    const numOffsets = Math.min(7, Math.ceil(ledCount / 8));
+                    // Create offsets for parallel rows based on stroke spacing
                     const offsets = [];
-                    for (let j = 0; j < numOffsets; j++) {
-                        offsets.push(offsetDistance * (0.3 + (j * 0.12)));
+                    for (let row = 0; row < numRows; row++) {
+                        const rowOffset = offsetDistance * (0.4 + (row * strokeSpacingPixels / maxStrokeDepth) * 0.6);
+                        offsets.push(rowOffset);
                     }
 
                     for (const offset of offsets) {

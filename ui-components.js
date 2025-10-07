@@ -123,12 +123,21 @@ class UIComponents {
                     </select>
                 </div>
                 
-                <!-- Module Pitch -->
+                <!-- Module Spacing -->
                 <div>
-                    <label for="modulePitch" class="block text-sm font-medium mb-1">Module Pitch</label>
+                    <label for="modulePitch" class="block text-sm font-medium mb-1">Module Spacing</label>
                     <div class="flex">
                         <input type="number" id="modulePitch" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:ring-blue-500 focus:border-blue-500" value="8">
                         <span class="inline-flex items-center px-3 text-sm text-gray-700 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg" id="modulePitchUnit">in</span>
+                    </div>
+                </div>
+
+                <!-- Stroke Spacing -->
+                <div>
+                    <label for="strokeSpacing" class="block text-sm font-medium mb-1">Stroke Spacing</label>
+                    <div class="flex">
+                        <input type="number" id="strokeSpacing" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-lg focus:ring-blue-500 focus:border-blue-500" value="6" step="0.5">
+                        <span class="inline-flex items-center px-3 text-sm text-gray-700 bg-gray-100 border border-l-0 border-gray-300 rounded-r-lg" id="strokeSpacingUnit">in</span>
                     </div>
                 </div>
             </div>
@@ -229,7 +238,7 @@ class UIComponents {
                 <!-- Stroke Width -->
                 <div>
                     <label for="strokeWidth" class="block text-sm font-medium mb-1">Stroke Width</label>
-                    <input type="range" id="strokeWidth" min="1" max="10" value="2" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    <input type="range" id="strokeWidth" min="1" max="10" value="3" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                     <div class="flex justify-between text-xs text-gray-500">
                         <span>1</span>
                         <span>3</span>
