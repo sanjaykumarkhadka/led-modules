@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import opentype from 'opentype.js';
 import { useProjectStore } from '../../data/store';
+import { useFonts } from '../../hooks/useFont';
 import { generateLEDPositions, type LEDPosition } from '../../core/math/placement';
+import { DimensionAnnotations } from './DimensionAnnotations';
+import type { BoundingBox } from '../../core/math/dimensions';
 
 // Fallback letter paths (block letters at scale 100)
 const FALLBACK_LETTERS: Record<string, string> = {
@@ -54,7 +56,7 @@ function generateCharPath(char: string, x: number, y: number, scale: number): st
   const scaleFactor = scale / 100;
 
   // Transform path commands
-  return basePath.replace(/([MLQZ])\s*([-\d.,\s]*)/gi, (match, cmd, coords) => {
+  return basePath.replace(/([MLQZ])\s*([-\d.,\s]*)/gi, (_match, cmd, coords) => {
     if (cmd === 'Z') return 'Z';
 
     const numbers = coords
@@ -103,43 +105,26 @@ function generateTextPath(
 }
 
 export const CanvasStage: React.FC = () => {
-  const { blocks, populateVersion, getCurrentModule, updateEngineeringData } = useProjectStore();
+  const {
+    blocks,
+    populateVersion,
+    getCurrentModule,
+    updateEngineeringData,
+    showDimensions,
+    dimensionUnit,
+  } = useProjectStore();
 
   const svgRef = useRef<SVGSVGElement>(null);
   const [leds, setLeds] = useState<LEDPosition[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [font, setFont] = useState<opentype.Font | null>(null);
+  const [letterBboxes, setLetterBboxes] = useState<BoundingBox[]>([]);
 
   const prevVersionRef = useRef(populateVersion);
 
-  // Load Font from reliable CDN
-  useEffect(() => {
-    const fontUrls = [
-      'https://cdn.jsdelivr.net/gh/nicktimko/font-roboto@master/roboto/Roboto-Regular.ttf',
-      'https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf',
-    ];
+  // Get unique languages from all blocks
+  const neededLanguages = useMemo(() => [...new Set(blocks.map((b) => b.language))], [blocks]);
 
-    const tryLoadFont = (urls: string[], index = 0) => {
-      if (index >= urls.length) {
-        console.log('All font URLs failed, using fallback paths');
-        setLoading(false);
-        return;
-      }
-
-      opentype.load(urls[index], (err, loadedFont) => {
-        if (err || !loadedFont) {
-          console.log(`Font URL ${index + 1} failed, trying next...`);
-          tryLoadFont(urls, index + 1);
-        } else {
-          console.log('Font loaded successfully');
-          setFont(loadedFont);
-          setLoading(false);
-        }
-      });
-    };
-
-    tryLoadFont(fontUrls);
-  }, []);
+  // Load fonts for all needed languages
+  const { fonts, loading } = useFonts(neededLanguages);
 
   // Generate Outlines using useMemo (derived state)
   const outlines = useMemo(() => {
@@ -147,8 +132,10 @@ export const CanvasStage: React.FC = () => {
 
     blocks.forEach((block) => {
       let d = '';
-      if (font && block.text) {
-        const path = font.getPath(block.text, block.x, block.y, block.fontSize);
+      // Get the font for this block's specific language
+      const blockFont = fonts.get(block.language);
+      if (blockFont && block.text) {
+        const path = blockFont.getPath(block.text, block.x, block.y, block.fontSize);
         d = path.toPathData(2);
       } else if (block.text) {
         // Use comprehensive fallback letter paths
@@ -160,7 +147,7 @@ export const CanvasStage: React.FC = () => {
     });
 
     return newOutlines;
-  }, [font, blocks]);
+  }, [fonts, blocks]);
 
   // Generate LEDs (On Demand via Populate button - user-triggered action)
   useEffect(() => {
@@ -197,6 +184,38 @@ export const CanvasStage: React.FC = () => {
       updateEngineeringData(allPositions.length);
     }
   }, [populateVersion, outlines, getCurrentModule, updateEngineeringData]);
+
+  // Calculate bounding boxes for dimension annotations - synchronizing with SVG DOM
+  useEffect(() => {
+    if (!svgRef.current || outlines.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLetterBboxes([]);
+      return;
+    }
+
+    const bboxes: BoundingBox[] = [];
+
+    outlines.forEach((d) => {
+      if (!d) return;
+
+      const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      tempPath.setAttribute('d', d);
+      tempPath.style.visibility = 'hidden';
+      svgRef.current?.appendChild(tempPath);
+
+      const bbox = tempPath.getBBox();
+      bboxes.push({
+        x: bbox.x,
+        y: bbox.y,
+        width: bbox.width,
+        height: bbox.height,
+      });
+
+      svgRef.current?.removeChild(tempPath);
+    });
+
+    setLetterBboxes(bboxes);
+  }, [outlines]);
 
   if (loading) {
     return (
@@ -281,6 +300,12 @@ export const CanvasStage: React.FC = () => {
           </g>
         ))}
 
+        {/* Dimension Annotations */}
+        {showDimensions &&
+          letterBboxes.map((bbox, i) => (
+            <DimensionAnnotations key={`dim-${i}`} bbox={bbox} unit={dimensionUnit} />
+          ))}
+
         {/* LEDs with Glow */}
         {leds.map((led, i) => (
           <g key={i} transform={`rotate(${led.rotation} ${led.x} ${led.y})`}>
@@ -339,20 +364,22 @@ export const CanvasStage: React.FC = () => {
             width="130"
             height="28"
             rx="14"
-            fill={font ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)'}
-            stroke={font ? '#22c55e' : '#eab308'}
+            fill={fonts.size > 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)'}
+            stroke={fonts.size > 0 ? '#22c55e' : '#eab308'}
             strokeWidth="1"
           />
           <text
             x="65"
             y="18"
             textAnchor="middle"
-            fill={font ? '#22c55e' : '#eab308'}
+            fill={fonts.size > 0 ? '#22c55e' : '#eab308'}
             fontSize="11"
             fontFamily="system-ui"
             fontWeight="500"
           >
-            {font ? 'Font Loaded' : 'Fallback Mode'}
+            {fonts.size > 0
+              ? `${fonts.size} Font${fonts.size > 1 ? 's' : ''} Loaded`
+              : 'Fallback Mode'}
           </text>
         </g>
       </svg>

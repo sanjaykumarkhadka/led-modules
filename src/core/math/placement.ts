@@ -1,4 +1,4 @@
-import type { LEDModule } from '../../data/catalog/types';
+import type { LEDModule } from '../../data/catalog/modules';
 import { calculateNormal, isPointInside, type Point } from './geometry';
 
 export interface LEDPosition extends Point {
