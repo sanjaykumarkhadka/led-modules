@@ -3,6 +3,7 @@ import { CanvasStage } from './components/canvas/CanvasStage';
 import { Button } from './components/ui/Button';
 import { MODULE_CATALOG } from './data/catalog/modules';
 import { SUPPORTED_LANGUAGES } from './data/languages';
+import { generatePDFReport } from './utils/pdfReport';
 
 function App() {
   const {
@@ -25,6 +26,26 @@ function App() {
   } = useProjectStore();
 
   const currentModule = MODULE_CATALOG.find((m) => m.id === selectedModuleId);
+
+  const handleGeneratePDF = async () => {
+    // Get the canvas container element (parent of SVG)
+    const canvasContainer = document.querySelector('.canvas-stage-container') as HTMLElement | null;
+
+    if (!currentModule) {
+      alert('Please select an LED module first');
+      return;
+    }
+
+    await generatePDFReport({
+      blocks,
+      totalModules,
+      totalPowerWatts,
+      depthInches,
+      currentModule,
+      recommendedPSU,
+      canvasContainer,
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 font-sans text-slate-100">
@@ -53,9 +74,21 @@ function App() {
         </div>
         <div className="flex gap-3">
           <Button variant="outline" onClick={() => window.print()}>
-            Print Report
+            Print Preview
           </Button>
-          <Button>Export PDF</Button>
+          <Button onClick={handleGeneratePDF}>
+            <span className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+              Export PDF
+            </span>
+          </Button>
         </div>
       </header>
 

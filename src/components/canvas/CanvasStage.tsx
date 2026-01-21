@@ -243,7 +243,7 @@ export const CanvasStage: React.FC = () => {
   }
 
   return (
-    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+    <div className="canvas-stage-container w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 rounded-lg overflow-hidden">
       <svg ref={svgRef} width="800" height="600" viewBox="0 0 800 600" className="drop-shadow-2xl">
         <defs>
           <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
