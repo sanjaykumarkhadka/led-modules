@@ -78,6 +78,36 @@ export function isPointInside(pathElement: SVGPathElement, x: number, y: number)
 }
 
 /**
+ * Check if an entire LED capsule (rotated rectangle) is inside a path.
+ * Validates center + both endpoints to ensure full containment.
+ */
+export function isCapsuleInside(
+  pathElement: SVGPathElement,
+  centerX: number,
+  centerY: number,
+  rotation: number, // degrees
+  halfLength: number = 6 // half capsule width (12px total)
+): boolean {
+  // Convert rotation to radians
+  const angleRad = (rotation * Math.PI) / 180;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+
+  // Calculate both endpoints
+  const endpoint1X = centerX - halfLength * cos;
+  const endpoint1Y = centerY - halfLength * sin;
+  const endpoint2X = centerX + halfLength * cos;
+  const endpoint2Y = centerY + halfLength * sin;
+
+  // All three points must be inside
+  return (
+    isPointInside(pathElement, centerX, centerY) &&
+    isPointInside(pathElement, endpoint1X, endpoint1Y) &&
+    isPointInside(pathElement, endpoint2X, endpoint2Y)
+  );
+}
+
+/**
  * Ray-casting helper to find distance from a point to the nearest edge in a specific direction.
  * Uses binary search ray-marching.
  */

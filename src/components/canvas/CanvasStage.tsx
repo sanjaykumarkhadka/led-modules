@@ -23,12 +23,15 @@ export const CanvasStage: React.FC = () => {
     selectedCharId,
     ledCountOverrides,
     ledColumnOverrides,
+    ledOrientationOverrides,
     selectChar,
     setCharLedCount,
     resetCharLedCount,
     getCharLedCount,
     setCharLedColumns,
     getCharLedColumns,
+    setCharLedOrientation,
+    getCharLedOrientation,
   } = useProjectStore();
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -106,6 +109,16 @@ export const CanvasStage: React.FC = () => {
     [setCharLedColumns]
   );
 
+  // Handle applying LED orientation
+  const handleApplyLedOrientation = useCallback(
+    (charId: string, orientation: 'horizontal' | 'vertical') => {
+      setCharLedOrientation(charId, orientation);
+      // Re-trigger population to update LEDs
+      useProjectStore.getState().triggerPopulation();
+    },
+    [setCharLedOrientation]
+  );
+
   // Handle reset LED count
   const handleResetLedCount = useCallback(
     (charId: string) => {
@@ -130,19 +143,29 @@ export const CanvasStage: React.FC = () => {
   }, [selectedCharId, selectChar]);
 
   const prevColumnOverridesRef = useRef(ledColumnOverrides);
+  const prevOrientationOverridesRef = useRef(ledOrientationOverrides);
 
   // Generate LEDs per character
   useEffect(() => {
     const versionChanged = populateVersion !== prevVersionRef.current || populateVersion === 0;
     const overridesChanged = ledCountOverrides !== prevOverridesRef.current;
     const columnOverridesChanged = ledColumnOverrides !== prevColumnOverridesRef.current;
+    const orientationOverridesChanged =
+      ledOrientationOverrides !== prevOrientationOverridesRef.current;
 
-    if (!versionChanged && !overridesChanged && !columnOverridesChanged) return;
+    if (
+      !versionChanged &&
+      !overridesChanged &&
+      !columnOverridesChanged &&
+      !orientationOverridesChanged
+    )
+      return;
     if (populateVersion === 0 && prevVersionRef.current === 0) return;
 
     prevVersionRef.current = populateVersion;
     prevOverridesRef.current = ledCountOverrides;
     prevColumnOverridesRef.current = ledColumnOverrides;
+    prevOrientationOverridesRef.current = ledOrientationOverrides;
 
     const currentModule = getCurrentModule();
     const visualPixelsPerInch = 12.5;
@@ -157,6 +180,7 @@ export const CanvasStage: React.FC = () => {
           const charId = `${blockId}-${charPath.charIndex}`;
           const targetCount = ledCountOverrides[charId];
           const columnCount = getCharLedColumns(charId);
+          const orientation = getCharLedOrientation(charId);
 
           // Create temp path for LED generation
           const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -170,6 +194,7 @@ export const CanvasStage: React.FC = () => {
             pixelsPerInch: visualPixelsPerInch,
             targetCount: targetCount,
             columnCount: columnCount,
+            orientation: orientation,
           });
 
           allCharLeds.push({
@@ -200,9 +225,11 @@ export const CanvasStage: React.FC = () => {
     blockCharPaths,
     ledCountOverrides,
     ledColumnOverrides,
+    ledOrientationOverrides,
     getCurrentModule,
     updateEngineeringData,
     getCharLedColumns,
+    getCharLedOrientation,
   ]);
 
   // Calculate bounding boxes for dimension annotations - synchronizing with SVG DOM
@@ -306,8 +333,9 @@ export const CanvasStage: React.FC = () => {
       char: charPath.char,
       currentCount: getCharLedCount(selectedCharId),
       currentColumns: getCharLedColumns(selectedCharId),
+      currentOrientation: getCharLedOrientation(selectedCharId),
     };
-  }, [selectedCharId, blockCharPaths, getCharLedCount, getCharLedColumns]);
+  }, [selectedCharId, blockCharPaths, getCharLedCount, getCharLedColumns, getCharLedOrientation]);
 
   if (loading) {
     return (
@@ -490,9 +518,11 @@ export const CanvasStage: React.FC = () => {
           char={selectedCharInfo.char}
           currentCount={selectedCharInfo.currentCount}
           currentColumns={selectedCharInfo.currentColumns}
+          currentOrientation={selectedCharInfo.currentOrientation}
           position={panelPosition}
           onApply={handleApplyLedCount}
           onApplyColumns={handleApplyLedColumns}
+          onApplyOrientation={handleApplyLedOrientation}
           onCancel={handleClosePanel}
           onReset={handleResetLedCount}
         />

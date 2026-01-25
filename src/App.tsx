@@ -28,13 +28,13 @@ function App() {
   const currentModule = MODULE_CATALOG.find((m) => m.id === selectedModuleId);
 
   const handleGeneratePDF = async () => {
-    // Get the canvas container element (parent of SVG)
-    const canvasContainer = document.querySelector('.canvas-stage-container') as HTMLElement | null;
-
     if (!currentModule) {
       alert('Please select an LED module first');
       return;
     }
+
+    // Get computed layout data from store
+    const { computedLayoutData } = useProjectStore.getState();
 
     await generatePDFReport({
       blocks,
@@ -43,7 +43,8 @@ function App() {
       depthInches,
       currentModule,
       recommendedPSU,
-      canvasContainer,
+      blockCharPaths: computedLayoutData?.blockCharPaths,
+      charLeds: computedLayoutData?.charLeds,
     });
   };
 

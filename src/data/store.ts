@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { MODULE_CATALOG, type LEDModule } from './catalog/modules';
 import { PSU_CATALOG, type PowerSupply } from './catalog/powerSupplies';
+import type { LEDPosition } from '../core/math/placement';
+import type { CharacterPath } from '../core/math/characterPaths';
 
 export interface TextBlock {
   id: string;
@@ -9,6 +11,21 @@ export interface TextBlock {
   y: number;
   fontSize: number; // Represents height in relative units
   language: string; // Per-block language for font selection
+}
+
+export interface BlockCharPaths {
+  blockId: string;
+  charPaths: CharacterPath[];
+}
+
+export interface CharLEDData {
+  charId: string;
+  leds: LEDPosition[];
+}
+
+export interface ComputedLayoutData {
+  blockCharPaths: BlockCharPaths[];
+  charLeds: CharLEDData[];
 }
 
 interface ProjectState {
@@ -23,10 +40,22 @@ interface ProjectState {
   showDimensions: boolean;
   dimensionUnit: 'mm' | 'in';
 
+  // Per-character LED selection state
+  selectedCharId: string | null; // Format: "blockId-charIndex"
+  ledCountOverrides: Record<string, number>; // Per-character LED counts
+  defaultLedCount: number; // Default LED count per character
+  ledColumnOverrides: Record<string, number>; // Per-character column counts (1-5)
+  defaultLedColumns: number; // Default column count for new characters
+  ledOrientationOverrides: Record<string, 'horizontal' | 'vertical'>; // Per-character orientation
+  defaultLedOrientation: 'horizontal' | 'vertical'; // Default LED orientation
+
   // Engineering Data (Calculated)
   totalModules: number;
   totalPowerWatts: number;
   recommendedPSU: PowerSupply | null;
+
+  // Computed layout data for PDF export
+  computedLayoutData: ComputedLayoutData | null;
 
   // Actions
   addBlock: () => void;
@@ -43,6 +72,26 @@ interface ProjectState {
   toggleDimensions: () => void;
   setDimensionUnit: (unit: 'mm' | 'in') => void;
 
+  // Character LED selection actions
+  selectChar: (charId: string | null) => void;
+  setCharLedCount: (charId: string, count: number) => void;
+  resetCharLedCount: (charId: string) => void;
+  setDefaultLedCount: (count: number) => void;
+  getCharLedCount: (charId: string) => number;
+
+  // Column count actions
+  setCharLedColumns: (charId: string, columns: number) => void;
+  resetCharLedColumns: (charId: string) => void;
+  getCharLedColumns: (charId: string) => number;
+
+  // Orientation actions
+  setCharLedOrientation: (charId: string, orientation: 'horizontal' | 'vertical') => void;
+  resetCharLedOrientation: (charId: string) => void;
+  getCharLedOrientation: (charId: string) => 'horizontal' | 'vertical';
+
+  // Layout data action
+  setComputedLayoutData: (data: ComputedLayoutData | null) => void;
+
   // Selectors
   getCurrentModule: () => LEDModule;
 }
@@ -56,9 +105,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   showDimensions: true,
   dimensionUnit: 'mm',
 
+  // Per-character LED selection state
+  selectedCharId: null,
+  ledCountOverrides: {},
+  defaultLedCount: 15,
+  ledColumnOverrides: {},
+  defaultLedColumns: 1,
+  ledOrientationOverrides: {},
+  defaultLedOrientation: 'horizontal',
+
   totalModules: 0,
   totalPowerWatts: 0,
   recommendedPSU: null,
+  computedLayoutData: null,
 
   triggerPopulation: () => set((state) => ({ populateVersion: state.populateVersion + 1 })),
 
@@ -95,6 +154,66 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   toggleDimensions: () => set((state) => ({ showDimensions: !state.showDimensions })),
   setDimensionUnit: (dimensionUnit) => set({ dimensionUnit }),
+
+  // Character LED selection actions
+  selectChar: (charId) => set({ selectedCharId: charId }),
+
+  setCharLedCount: (charId, count) =>
+    set((state) => ({
+      ledCountOverrides: { ...state.ledCountOverrides, [charId]: count },
+    })),
+
+  resetCharLedCount: (charId) =>
+    set((state) => {
+      const { [charId]: _removed, ...rest } = state.ledCountOverrides;
+      void _removed; // Intentionally unused - we're removing this key
+      return { ledCountOverrides: rest };
+    }),
+
+  setDefaultLedCount: (count) => set({ defaultLedCount: count }),
+
+  getCharLedCount: (charId) => {
+    const state = get();
+    return state.ledCountOverrides[charId] ?? state.defaultLedCount;
+  },
+
+  // Column count actions
+  setCharLedColumns: (charId, columns) =>
+    set((state) => ({
+      ledColumnOverrides: { ...state.ledColumnOverrides, [charId]: columns },
+    })),
+
+  resetCharLedColumns: (charId) =>
+    set((state) => {
+      const { [charId]: _removed, ...rest } = state.ledColumnOverrides;
+      void _removed; // Intentionally unused - we're removing this key
+      return { ledColumnOverrides: rest };
+    }),
+
+  getCharLedColumns: (charId) => {
+    const state = get();
+    return state.ledColumnOverrides[charId] ?? state.defaultLedColumns;
+  },
+
+  // Orientation actions
+  setCharLedOrientation: (charId, orientation) =>
+    set((state) => ({
+      ledOrientationOverrides: { ...state.ledOrientationOverrides, [charId]: orientation },
+    })),
+
+  resetCharLedOrientation: (charId) =>
+    set((state) => {
+      const { [charId]: _removed, ...rest } = state.ledOrientationOverrides;
+      void _removed; // Intentionally unused - we're removing this key
+      return { ledOrientationOverrides: rest };
+    }),
+
+  getCharLedOrientation: (charId) => {
+    const state = get();
+    return state.ledOrientationOverrides[charId] ?? state.defaultLedOrientation;
+  },
+
+  setComputedLayoutData: (data) => set({ computedLayoutData: data }),
 
   getCurrentModule: () => {
     const id = get().selectedModuleId;

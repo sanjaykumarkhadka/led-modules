@@ -4,10 +4,10 @@
  */
 
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
-import type { TextBlock } from '../data/store';
+import type { TextBlock, BlockCharPaths, CharLEDData } from '../data/store';
 import type { LEDModule } from '../data/catalog/modules';
 import type { PowerSupply } from '../data/catalog/powerSupplies';
+import { drawTechnicalLayout } from './technicalDrawing';
 
 // Qwatt brand colors
 const COLORS = {
@@ -26,27 +26,8 @@ interface ReportData {
   depthInches: number;
   currentModule: LEDModule;
   recommendedPSU: PowerSupply | null;
-  canvasContainer: HTMLElement | null;
-}
-
-/**
- * Capture the canvas container as an image using html2canvas
- */
-async function captureCanvasAsImage(container: HTMLElement): Promise<string | null> {
-  try {
-    // Use html2canvas to capture the container with all its visual effects
-    const canvas = await html2canvas(container, {
-      backgroundColor: '#ffffff',
-      scale: 2, // Higher resolution for better PDF quality
-      logging: false,
-      useCORS: true,
-    });
-
-    return canvas.toDataURL('image/png', 1.0);
-  } catch (e) {
-    console.error('Canvas capture error:', e);
-    return null;
-  }
+  blockCharPaths?: BlockCharPaths[];
+  charLeds?: CharLEDData[];
 }
 
 /**
@@ -81,8 +62,8 @@ function drawHeader(doc: jsPDF, pageWidth: number): number {
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(COLORS.gray);
-  doc.text('1-888-QWATT-LED', centerX, 20, { align: 'center' });
-  doc.text('support@qwatt.com', centerX, 25, { align: 'center' });
+  doc.text('+91-7907835933', centerX, 20, { align: 'center' });
+  doc.text('info@qwatt.co', centerX, 25, { align: 'center' });
 
   // Date (right aligned)
   const rightX = pageWidth - 15;
@@ -218,41 +199,35 @@ export async function generatePDFReport(data: ReportData): Promise<void> {
   // Draw header
   const contentStartY = drawHeader(doc, pageWidth);
 
-  // Capture and add canvas image
-  if (data.canvasContainer) {
-    const imageData = await captureCanvasAsImage(data.canvasContainer);
-    if (imageData) {
-      // Calculate image dimensions to fit nicely
-      const maxImgWidth = pageWidth - 30;
-      const maxImgHeight = pageHeight - contentStartY - 55; // Leave room for specs and disclaimer
+  // Calculate available space for drawing
+  const maxDrawWidth = pageWidth - 30;
+  const maxDrawHeight = pageHeight - contentStartY - 55; // Leave room for specs and disclaimer
 
-      // Get aspect ratio from the container
-      const containerWidth = data.canvasContainer.offsetWidth || 800;
-      const containerHeight = data.canvasContainer.offsetHeight || 600;
-      const aspectRatio = containerWidth / containerHeight;
-
-      let imgWidth = maxImgWidth;
-      let imgHeight = imgWidth / aspectRatio;
-
-      if (imgHeight > maxImgHeight) {
-        imgHeight = maxImgHeight;
-        imgWidth = imgHeight * aspectRatio;
+  // Draw technical layout if we have layout data
+  if (data.blockCharPaths && data.charLeds && data.blockCharPaths.length > 0) {
+    drawTechnicalLayout(
+      doc,
+      {
+        blockCharPaths: data.blockCharPaths,
+        charLeds: data.charLeds,
+        blocks: data.blocks,
+      },
+      {
+        x: 15,
+        y: contentStartY,
+        maxWidth: maxDrawWidth,
+        maxHeight: maxDrawHeight,
       }
+    );
 
-      const imgX = (pageWidth - imgWidth) / 2;
-      const imgY = contentStartY;
+    // Draw specs footer below the drawing area
+    const specsY = contentStartY + maxDrawHeight + 5;
+    drawSpecsFooter(doc, data, specsY, pageWidth);
 
-      doc.addImage(imageData, 'PNG', imgX, imgY, imgWidth, imgHeight);
-
-      // Draw specs footer below the image
-      const specsY = imgY + imgHeight + 5;
-      drawSpecsFooter(doc, data, specsY, pageWidth);
-
-      // Draw disclaimer
-      drawDisclaimer(doc, specsY + 38, pageWidth);
-    }
+    // Draw disclaimer
+    drawDisclaimer(doc, specsY + 38, pageWidth);
   } else {
-    // No SVG - just show message
+    // No layout data - show message
     doc.setFontSize(14);
     doc.setTextColor(COLORS.gray);
     doc.text(

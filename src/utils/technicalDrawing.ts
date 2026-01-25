@@ -359,27 +359,41 @@ function drawLEDModules(
       const cx = offsetX + led.x * scale;
       const cy = offsetY + led.y * scale;
 
+      // Check if LED should be vertical (rotation ~90° or ~-90°)
+      const isVertical = Math.abs(Math.abs(led.rotation) - 90) < 45;
+
+      // Swap dimensions for vertical LEDs
+      const w = isVertical ? moduleH : moduleW; // 1.5mm for vertical, 3mm for horizontal
+      const h = isVertical ? moduleW : moduleH; // 3mm for vertical, 1.5mm for horizontal
+      const cornerRadius = Math.min(w, h) / 2; // Fully rounded ends
+
       doc.saveGraphicsState();
 
       // 1. Capsule outline (stroke only, no fill)
       doc.setDrawColor(SPECS.ledModuleStroke);
       doc.setLineWidth(0.15);
       doc.roundedRect(
-        cx - moduleW / 2,
-        cy - moduleH / 2,
-        moduleW,
-        moduleH,
-        capsuleRadius,
-        capsuleRadius,
+        cx - w / 2,
+        cy - h / 2,
+        w,
+        h,
+        cornerRadius,
+        cornerRadius,
         'S' // Stroke only
       );
 
-      // 2. Left dot
+      // 2. Draw LED dots - position depends on orientation
       doc.setFillColor(SPECS.ledModuleStroke);
-      doc.circle(cx - dotOffset, cy, dotRadius, 'F');
-
-      // 3. Right dot
-      doc.circle(cx + dotOffset, cy, dotRadius, 'F');
+      if (isVertical) {
+        // Dots stacked vertically (top and bottom)
+        const vertDotOffset = moduleW / 2 - capsuleRadius;
+        doc.circle(cx, cy - vertDotOffset, dotRadius, 'F');
+        doc.circle(cx, cy + vertDotOffset, dotRadius, 'F');
+      } else {
+        // Dots side by side (left and right) - original behavior
+        doc.circle(cx - dotOffset, cy, dotRadius, 'F');
+        doc.circle(cx + dotOffset, cy, dotRadius, 'F');
+      }
 
       doc.restoreGraphicsState();
     });
