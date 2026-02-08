@@ -23,6 +23,15 @@ export interface CharLEDData {
   leds: LEDPosition[];
 }
 
+export interface ManualLED {
+  id: string;
+  u: number;
+  v: number;
+  rotation: number;
+  /** Uniform scale; base size is 12×5. Default 1. Keeps module shape fixed. */
+  scale?: number;
+}
+
 export interface ComputedLayoutData {
   blockCharPaths: BlockCharPaths[];
   charLeds: CharLEDData[];
@@ -36,6 +45,7 @@ interface ProjectState {
 
   // UI State
   selectedBlockId: string | null;
+  editorCharId: string | null;
   populateVersion: number; // Increment to trigger calculation
   showDimensions: boolean;
   dimensionUnit: 'mm' | 'in';
@@ -46,8 +56,11 @@ interface ProjectState {
   defaultLedCount: number; // Default LED count per character
   ledColumnOverrides: Record<string, number>; // Per-character column counts (1-5)
   defaultLedColumns: number; // Default column count for new characters
-  ledOrientationOverrides: Record<string, 'horizontal' | 'vertical'>; // Per-character orientation
-  defaultLedOrientation: 'horizontal' | 'vertical'; // Default LED orientation
+  ledOrientationOverrides: Record<string, 'horizontal' | 'vertical' | 'auto'>; // Per-character orientation
+  defaultLedOrientation: 'horizontal' | 'vertical' | 'auto'; // Default LED orientation
+  placementModeOverrides: Record<string, 'auto' | 'manual'>; // Per-character placement mode
+  defaultPlacementMode: 'auto' | 'manual'; // Default placement mode
+  manualLedOverrides: Record<string, ManualLED[]>; // Per-character manual LEDs (normalized)
 
   // Engineering Data (Calculated)
   totalModules: number;
@@ -71,6 +84,8 @@ interface ProjectState {
   // Dimension actions
   toggleDimensions: () => void;
   setDimensionUnit: (unit: 'mm' | 'in') => void;
+  openEditor: (charId: string) => void;
+  closeEditor: () => void;
 
   // Character LED selection actions
   selectChar: (charId: string | null) => void;
@@ -85,9 +100,25 @@ interface ProjectState {
   getCharLedColumns: (charId: string) => number;
 
   // Orientation actions
-  setCharLedOrientation: (charId: string, orientation: 'horizontal' | 'vertical') => void;
+  setCharLedOrientation: (
+    charId: string,
+    orientation: 'horizontal' | 'vertical' | 'auto'
+  ) => void;
   resetCharLedOrientation: (charId: string) => void;
-  getCharLedOrientation: (charId: string) => 'horizontal' | 'vertical';
+  getCharLedOrientation: (charId: string) => 'horizontal' | 'vertical' | 'auto';
+
+  // Placement mode actions
+  setCharPlacementMode: (charId: string, mode: 'auto' | 'manual') => void;
+  resetCharPlacementMode: (charId: string) => void;
+  getCharPlacementMode: (charId: string) => 'auto' | 'manual';
+
+  // Manual LED actions
+  setCharManualLeds: (charId: string, leds: ManualLED[]) => void;
+  addCharManualLed: (charId: string, led: ManualLED) => void;
+  updateCharManualLed: (charId: string, ledId: string, updates: Partial<ManualLED>) => void;
+  removeCharManualLed: (charId: string, ledId: string) => void;
+  clearCharManualLeds: (charId: string) => void;
+  getCharManualLeds: (charId: string) => ManualLED[];
 
   // Layout data action
   setComputedLayoutData: (data: ComputedLayoutData | null) => void;
@@ -101,6 +132,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   depthInches: 5.0,
   selectedModuleId: 'tetra-max-medium-24v',
   selectedBlockId: '1',
+  editorCharId: null,
   populateVersion: 0,
   showDimensions: true,
   dimensionUnit: 'mm',
@@ -112,7 +144,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   ledColumnOverrides: {},
   defaultLedColumns: 1,
   ledOrientationOverrides: {},
-  defaultLedOrientation: 'horizontal',
+  defaultLedOrientation: 'auto',
+  placementModeOverrides: {},
+  defaultPlacementMode: 'manual',
+  manualLedOverrides: {},
 
   totalModules: 0,
   totalPowerWatts: 0,
@@ -154,6 +189,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   toggleDimensions: () => set((state) => ({ showDimensions: !state.showDimensions })),
   setDimensionUnit: (dimensionUnit) => set({ dimensionUnit }),
+  openEditor: (charId) => set({ editorCharId: charId }),
+  closeEditor: () => set({ editorCharId: null }),
 
   // Character LED selection actions
   selectChar: (charId) => set({ selectedCharId: charId }),
@@ -211,6 +248,66 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   getCharLedOrientation: (charId) => {
     const state = get();
     return state.ledOrientationOverrides[charId] ?? state.defaultLedOrientation;
+  },
+
+  setCharPlacementMode: (charId, mode) =>
+    set((state) => ({
+      placementModeOverrides: { ...state.placementModeOverrides, [charId]: mode },
+    })),
+
+  resetCharPlacementMode: (charId) =>
+    set((state) => {
+      const { [charId]: _removed, ...rest } = state.placementModeOverrides;
+      void _removed;
+      return { placementModeOverrides: rest };
+    }),
+
+  getCharPlacementMode: (charId) => {
+    const state = get();
+    return state.placementModeOverrides[charId] ?? state.defaultPlacementMode;
+  },
+
+  setCharManualLeds: (charId, leds) =>
+    set((state) => ({
+      manualLedOverrides: { ...state.manualLedOverrides, [charId]: leds },
+    })),
+
+  addCharManualLed: (charId, led) =>
+    set((state) => ({
+      manualLedOverrides: {
+        ...state.manualLedOverrides,
+        [charId]: [...(state.manualLedOverrides[charId] || []), led],
+      },
+    })),
+
+  updateCharManualLed: (charId, ledId, updates) =>
+    set((state) => ({
+      manualLedOverrides: {
+        ...state.manualLedOverrides,
+        [charId]: (state.manualLedOverrides[charId] || []).map((led) =>
+          led.id === ledId ? { ...led, ...updates } : led
+        ),
+      },
+    })),
+
+  removeCharManualLed: (charId, ledId) =>
+    set((state) => ({
+      manualLedOverrides: {
+        ...state.manualLedOverrides,
+        [charId]: (state.manualLedOverrides[charId] || []).filter((led) => led.id !== ledId),
+      },
+    })),
+
+  clearCharManualLeds: (charId) =>
+    set((state) => {
+      const { [charId]: _removed, ...rest } = state.manualLedOverrides;
+      void _removed;
+      return { manualLedOverrides: rest };
+    }),
+
+  getCharManualLeds: (charId) => {
+    const state = get();
+    return state.manualLedOverrides[charId] || [];
   },
 
   setComputedLayoutData: (data) => set({ computedLayoutData: data }),

@@ -4,6 +4,7 @@ import { Button } from './components/ui/Button';
 import { MODULE_CATALOG } from './data/catalog/modules';
 import { SUPPORTED_LANGUAGES } from './data/languages';
 import { generatePDFReport } from './utils/pdfReport';
+import { ManualDesignerPage } from './components/editor/ManualDesignerPage';
 
 function App() {
   const {
@@ -13,6 +14,7 @@ function App() {
     totalModules,
     totalPowerWatts,
     recommendedPSU,
+    editorCharId,
     addBlock,
     updateBlock,
     removeBlock,
@@ -214,7 +216,7 @@ function App() {
                       d="M13 10V3L4 14h7v7l9-11h-7z"
                     />
                   </svg>
-                  POPULATE LEDs
+                  AUTO POPULATE LEDs
                 </span>
               </Button>
             </div>
@@ -399,6 +401,8 @@ function App() {
           </div>
         </div>
       </main>
+
+      {editorCharId && <ManualDesignerPage />}
     </div>
   );
 }

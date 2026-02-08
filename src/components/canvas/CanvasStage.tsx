@@ -1,10 +1,19 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { useProjectStore, type BlockCharPaths, type CharLEDData } from '../../data/store';
+import {
+  useProjectStore,
+  type BlockCharPaths,
+  type CharLEDData,
+  type ManualLED,
+} from '../../data/store';
 import { useFonts } from '../../hooks/useFont';
 import { generateLEDPositions } from '../../core/math/placement';
+import {
+  DEFAULT_QUALITY_THRESHOLDS,
+  evaluatePlacementQuality,
+  gradePlacement,
+} from '../../core/math/placementQuality';
 import { DimensionAnnotations } from './DimensionAnnotations';
 import { CharacterGroup } from './CharacterGroup';
-import { CharacterLEDPanel } from '../ui/CharacterLEDPanel';
 import {
   generateCharacterPaths,
   generateFallbackCharacterPaths,
@@ -24,14 +33,16 @@ export const CanvasStage: React.FC = () => {
     ledCountOverrides,
     ledColumnOverrides,
     ledOrientationOverrides,
+    placementModeOverrides,
+    manualLedOverrides,
     selectChar,
-    setCharLedCount,
-    resetCharLedCount,
     getCharLedCount,
-    setCharLedColumns,
     getCharLedColumns,
-    setCharLedOrientation,
     getCharLedOrientation,
+    setCharPlacementMode,
+    getCharPlacementMode,
+    getCharManualLeds,
+    openEditor,
   } = useProjectStore();
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -39,7 +50,6 @@ export const CanvasStage: React.FC = () => {
 
   const [charLeds, setCharLeds] = useState<CharLEDData[]>([]);
   const [letterBboxes, setLetterBboxes] = useState<BoundingBox[]>([]);
-  const [panelPosition, setPanelPosition] = useState<{ x: number; y: number } | null>(null);
 
   const prevVersionRef = useRef(populateVersion);
   const prevOverridesRef = useRef(ledCountOverrides);
@@ -71,6 +81,16 @@ export const CanvasStage: React.FC = () => {
     });
   }, [fonts, blocks]);
 
+  const charPathMap = useMemo(() => {
+    const map = new Map<string, CharacterPath>();
+    blockCharPaths.forEach(({ blockId, charPaths }) => {
+      charPaths.forEach((cp) => {
+        map.set(`${blockId}-${cp.charIndex}`, cp);
+      });
+    });
+    return map;
+  }, [blockCharPaths]);
+
   // Register path refs for LED placement
   const registerPathRef = useCallback((el: SVGPathElement | null, charId: string) => {
     if (el) {
@@ -80,70 +100,65 @@ export const CanvasStage: React.FC = () => {
     }
   }, []);
 
+  const getCharBBox = useCallback(
+    (charId: string) => {
+      const cp = charPathMap.get(charId);
+      if (cp?.bbox) return cp.bbox;
+      const pathEl = pathRefs.current.get(charId);
+      if (pathEl) {
+        const bbox = pathEl.getBBox();
+        return { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+      }
+      return null;
+    },
+    [charPathMap]
+  );
+
+  const toAbsoluteLED = useCallback((led: ManualLED, bbox: BoundingBox) => {
+    return {
+      x: bbox.x + led.u * bbox.width,
+      y: bbox.y + led.v * bbox.height,
+      rotation: led.rotation,
+      id: led.id,
+      source: 'manual' as const,
+    };
+  }, []);
+
   // Handle character selection
   const handleCharSelect = useCallback(
-    (charId: string, position: { x: number; y: number }) => {
+    (charId: string, _position: { x: number; y: number }) => {
       selectChar(charId);
-      setPanelPosition(position);
     },
     [selectChar]
   );
 
-  // Handle applying LED count
-  const handleApplyLedCount = useCallback(
-    (charId: string, count: number) => {
-      setCharLedCount(charId, count);
-      // Re-trigger population to update LEDs
-      useProjectStore.getState().triggerPopulation();
+  const handleApplyPlacementMode = useCallback(
+    (charId: string, mode: 'auto' | 'manual') => {
+      setCharPlacementMode(charId, mode);
+      // Auto mode should re-populate
+      if (mode === 'auto') {
+        useProjectStore.getState().triggerPopulation();
+      }
     },
-    [setCharLedCount]
+    [setCharPlacementMode]
   );
-
-  // Handle applying LED columns
-  const handleApplyLedColumns = useCallback(
-    (charId: string, columns: number) => {
-      setCharLedColumns(charId, columns);
-      // Re-trigger population to update LEDs
-      useProjectStore.getState().triggerPopulation();
-    },
-    [setCharLedColumns]
-  );
-
-  // Handle applying LED orientation
-  const handleApplyLedOrientation = useCallback(
-    (charId: string, orientation: 'horizontal' | 'vertical') => {
-      setCharLedOrientation(charId, orientation);
-      // Re-trigger population to update LEDs
-      useProjectStore.getState().triggerPopulation();
-    },
-    [setCharLedOrientation]
-  );
-
-  // Handle reset LED count
-  const handleResetLedCount = useCallback(
-    (charId: string) => {
-      resetCharLedCount(charId);
-      useProjectStore.getState().triggerPopulation();
-    },
-    [resetCharLedCount]
-  );
-
-  // Handle cancel/close panel
-  const handleClosePanel = useCallback(() => {
-    selectChar(null);
-    setPanelPosition(null);
-  }, [selectChar]);
 
   // Handle clicking on background to deselect
   const handleBackgroundClick = useCallback(() => {
     if (selectedCharId) {
       selectChar(null);
-      setPanelPosition(null);
     }
   }, [selectedCharId, selectChar]);
 
   const prevColumnOverridesRef = useRef(ledColumnOverrides);
   const prevOrientationOverridesRef = useRef(ledOrientationOverrides);
+  const prevManualOverridesRef = useRef(manualLedOverrides);
+  const prevPlacementModeOverridesRef = useRef(placementModeOverrides);
+  const showQA = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).has('qa');
+  }, []);
+
 
   // Generate LEDs per character
   useEffect(() => {
@@ -152,20 +167,33 @@ export const CanvasStage: React.FC = () => {
     const columnOverridesChanged = ledColumnOverrides !== prevColumnOverridesRef.current;
     const orientationOverridesChanged =
       ledOrientationOverrides !== prevOrientationOverridesRef.current;
+    const manualOverridesChanged = manualLedOverrides !== prevManualOverridesRef.current;
+    const placementModeChanged =
+      placementModeOverrides !== prevPlacementModeOverridesRef.current;
 
     if (
       !versionChanged &&
       !overridesChanged &&
       !columnOverridesChanged &&
-      !orientationOverridesChanged
+      !orientationOverridesChanged &&
+      !manualOverridesChanged &&
+      !placementModeChanged
     )
       return;
-    if (populateVersion === 0 && prevVersionRef.current === 0) return;
+    if (
+      populateVersion === 0 &&
+      prevVersionRef.current === 0 &&
+      !manualOverridesChanged &&
+      !placementModeChanged
+    )
+      return;
 
     prevVersionRef.current = populateVersion;
     prevOverridesRef.current = ledCountOverrides;
     prevColumnOverridesRef.current = ledColumnOverrides;
     prevOrientationOverridesRef.current = ledOrientationOverrides;
+    prevManualOverridesRef.current = manualLedOverrides;
+    prevPlacementModeOverridesRef.current = placementModeOverrides;
 
     const currentModule = getCurrentModule();
     const visualPixelsPerInch = 12.5;
@@ -178,7 +206,23 @@ export const CanvasStage: React.FC = () => {
           if (!charPath.pathData) return; // Skip spaces
 
           const charId = `${blockId}-${charPath.charIndex}`;
-          const targetCount = ledCountOverrides[charId];
+          const placementMode = getCharPlacementMode(charId);
+
+          if (placementMode === 'manual') {
+            const bbox = charPath.bbox || getCharBBox(charId);
+            const manualLeds = getCharManualLeds(charId);
+            const positions =
+              bbox && manualLeds.length > 0
+                ? manualLeds.map((led) => toAbsoluteLED(led, bbox))
+                : [];
+            allCharLeds.push({
+              charId,
+              leds: positions,
+            });
+            return;
+          }
+
+          const targetCount = getCharLedCount(charId);
           const columnCount = getCharLedColumns(charId);
           const orientation = getCharLedOrientation(charId);
 
@@ -199,7 +243,7 @@ export const CanvasStage: React.FC = () => {
 
           allCharLeds.push({
             charId,
-            leds: positions,
+            leds: positions.map((led) => ({ ...led, source: 'auto' as const })),
           });
 
           svgRef.current?.removeChild(tempPath);
@@ -226,10 +270,17 @@ export const CanvasStage: React.FC = () => {
     ledCountOverrides,
     ledColumnOverrides,
     ledOrientationOverrides,
+    manualLedOverrides,
+    placementModeOverrides,
     getCurrentModule,
     updateEngineeringData,
+    getCharLedCount,
     getCharLedColumns,
     getCharLedOrientation,
+    getCharManualLeds,
+    getCharPlacementMode,
+    getCharBBox,
+    toAbsoluteLED,
   ]);
 
   // Calculate bounding boxes for dimension annotations - synchronizing with SVG DOM
@@ -273,6 +324,34 @@ export const CanvasStage: React.FC = () => {
   const allLeds = useMemo(() => {
     return charLeds.flatMap((c) => c.leds);
   }, [charLeds]);
+
+  const qaResults = useMemo(() => {
+    if (!showQA) return [];
+
+    const charLabelMap = new Map<string, string>();
+    blockCharPaths.forEach(({ blockId, charPaths }) => {
+      charPaths.forEach((cp) => {
+        charLabelMap.set(`${blockId}-${cp.charIndex}`, cp.char || '');
+      });
+    });
+
+    return charLeds
+      .map((charData) => {
+        const path = pathRefs.current.get(charData.charId);
+        if (!path || charData.leds.length === 0) return null;
+
+        const quality = evaluatePlacementQuality(path, charData.leds);
+        const grade = gradePlacement(quality, DEFAULT_QUALITY_THRESHOLDS);
+
+        return {
+          charId: charData.charId,
+          char: charLabelMap.get(charData.charId) || '',
+          quality,
+          grade,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }, [showQA, charLeds, blockCharPaths]);
 
   // Calculate dynamic viewBox based on content bounds
   const viewBox = useMemo(() => {
@@ -334,8 +413,18 @@ export const CanvasStage: React.FC = () => {
       currentCount: getCharLedCount(selectedCharId),
       currentColumns: getCharLedColumns(selectedCharId),
       currentOrientation: getCharLedOrientation(selectedCharId),
+      placementMode: getCharPlacementMode(selectedCharId),
+      manualCount: getCharManualLeds(selectedCharId).length,
     };
-  }, [selectedCharId, blockCharPaths, getCharLedCount, getCharLedColumns, getCharLedOrientation]);
+  }, [
+    selectedCharId,
+    blockCharPaths,
+    getCharLedCount,
+    getCharLedColumns,
+    getCharLedOrientation,
+    getCharPlacementMode,
+    getCharManualLeds,
+  ]);
 
   if (loading) {
     return (
@@ -428,6 +517,7 @@ export const CanvasStage: React.FC = () => {
           ))
         )}
 
+
         {/* Dimension Annotations */}
         {showDimensions &&
           letterBboxes.map((bbox, i) => (
@@ -435,26 +525,31 @@ export const CanvasStage: React.FC = () => {
           ))}
 
         {/* LEDs - Capsule style with end dots */}
-        {allLeds.map((led, i) => (
-          <g key={i} transform={`rotate(${led.rotation} ${led.x} ${led.y})`}>
-            {/* Capsule body - rounded rectangle outline */}
-            <rect
-              x={led.x - 6}
-              y={led.y - 2.5}
-              width={12}
-              height={5}
-              rx={2.5}
-              ry={2.5}
-              fill="none"
-              stroke="#334155"
-              strokeWidth={0.8}
-            />
-            {/* Left dot */}
-            <circle cx={led.x - 3.5} cy={led.y} r={1.2} fill="#334155" />
-            {/* Right dot */}
-            <circle cx={led.x + 3.5} cy={led.y} r={1.2} fill="#334155" />
-          </g>
-        ))}
+        {charLeds.map(({ charId, leds }) =>
+          leds.map((led, i) => {
+            const isManual =
+              led.source === 'manual' && getCharPlacementMode(charId) === 'manual';
+            const key = led.id ? `led-${led.id}` : `${charId}-${i}`;
+
+            return (
+              <g key={key} transform={`rotate(${led.rotation} ${led.x} ${led.y})`}>
+                <rect
+                  x={led.x - 6}
+                  y={led.y - 2.5}
+                  width={12}
+                  height={5}
+                  rx={2.5}
+                  ry={2.5}
+                  fill="none"
+                  stroke={isManual ? '#38bdf8' : '#334155'}
+                  strokeWidth={0.8}
+                />
+                <circle cx={led.x - 3.5} cy={led.y} r={1.2} fill="#334155" />
+                <circle cx={led.x + 3.5} cy={led.y} r={1.2} fill="#334155" />
+              </g>
+            );
+          })
+        )}
 
         {/* Status Badge */}
         <g transform={`translate(${viewBox.x + 20}, ${viewBox.y + viewBox.height - 40})`}>
@@ -511,21 +606,93 @@ export const CanvasStage: React.FC = () => {
         </g>
       </svg>
 
-      {/* Character LED Panel (popup) */}
-      {selectedCharId && panelPosition && selectedCharInfo && (
-        <CharacterLEDPanel
-          charId={selectedCharId}
-          char={selectedCharInfo.char}
-          currentCount={selectedCharInfo.currentCount}
-          currentColumns={selectedCharInfo.currentColumns}
-          currentOrientation={selectedCharInfo.currentOrientation}
-          position={panelPosition}
-          onApply={handleApplyLedCount}
-          onApplyColumns={handleApplyLedColumns}
-          onApplyOrientation={handleApplyLedOrientation}
-          onCancel={handleClosePanel}
-          onReset={handleResetLedCount}
-        />
+      {selectedCharId && selectedCharInfo && (
+        <div className="absolute left-4 top-4 z-40 bg-slate-900/90 border border-slate-700 rounded-xl p-4 shadow-xl w-[280px]">
+          <div className="text-xs text-slate-400 uppercase tracking-wide">Selected Character</div>
+          <div className="flex items-center gap-3 mt-2">
+            <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl font-bold text-white">
+              {selectedCharInfo.char || '·'}
+            </div>
+            <div>
+              <div className="text-sm font-semibold text-white">{selectedCharId}</div>
+              <div className="text-xs text-slate-400">
+                {selectedCharInfo.placementMode === 'manual' ? 'Manual' : 'Auto'} ·{' '}
+                {selectedCharInfo.manualCount} LEDs
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() => handleApplyPlacementMode(selectedCharId, 'manual')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold ${
+                selectedCharInfo.placementMode === 'manual'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              Manual
+            </button>
+            <button
+              onClick={() => handleApplyPlacementMode(selectedCharId, 'auto')}
+              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold ${
+                selectedCharInfo.placementMode === 'auto'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              Auto
+            </button>
+          </div>
+
+          <button
+            onClick={() => openEditor(selectedCharId)}
+            className="mt-3 w-full px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-400 transition-colors"
+          >
+            Open Manual Designer
+          </button>
+        </div>
+      )}
+
+      {showQA && qaResults.length > 0 && (
+        <div className="absolute top-3 right-3 z-50 max-w-[360px] bg-slate-950/90 border border-slate-700 rounded-lg p-3 text-xs text-slate-200">
+          <div className="font-semibold text-sm mb-2">Placement QA</div>
+          <div className="text-[11px] text-slate-400 mb-2">
+            Thresholds: inside ≥ {DEFAULT_QUALITY_THRESHOLDS.insideRate}, nnCv ≤{' '}
+            {DEFAULT_QUALITY_THRESHOLDS.nnCv}, minClear ≥ {DEFAULT_QUALITY_THRESHOLDS.minClearance}
+            , symmetry ≥ {DEFAULT_QUALITY_THRESHOLDS.symmetryMean}
+          </div>
+          <div className="space-y-2 max-h-[240px] overflow-auto pr-1">
+            {qaResults.map((result) => (
+              <div
+                key={result.charId}
+                className={`rounded border px-2 py-1 ${
+                  result.grade.pass
+                    ? 'border-emerald-500/40 bg-emerald-500/10'
+                    : 'border-rose-500/40 bg-rose-500/10'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{result.char || '·'}</span>
+                  <span className={result.grade.pass ? 'text-emerald-300' : 'text-rose-300'}>
+                    {result.grade.pass ? 'PASS' : 'FAIL'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1 text-[11px] text-slate-300">
+                  <span>inside: {(result.quality.insideRate * 100).toFixed(0)}%</span>
+                  <span>nnCv: {result.quality.nnCv.toFixed(2)}</span>
+                  <span>minClear: {result.quality.minClearance.toFixed(2)}</span>
+                  <span>sym: {result.quality.symmetryMean.toFixed(2)}</span>
+                </div>
+                {!result.grade.pass && result.grade.failures.length > 0 && (
+                  <div className="mt-1 text-[10px] text-rose-200">
+                    {result.grade.failures.join(', ')}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

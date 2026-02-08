@@ -1,384 +1,438 @@
 import type { LEDModule } from '../../data/catalog/modules';
-import { calculateNormal, isCapsuleInside, isPointInside, type Point } from './geometry';
-import { measureStrokeWidth } from './measureStrokeWidth';
+import { findDistanceToEdge, isCapsuleInside, isPointInside, type Point } from './geometry';
 
 export interface LEDPosition extends Point {
   rotation: number; // degrees
+  id?: string;
+  source?: 'auto' | 'manual';
 }
 
 export interface PlacementConfig {
   targetModule: LEDModule;
-  strokeWidth: number; // inches? or pixels? Assuming pixels for canvas logic usually
+  strokeWidth: number; // kept for API compatibility
   pixelsPerInch: number;
-  targetCount?: number; // Optional target LED count for per-character adjustment
-  columnCount?: number; // Number of parallel LED columns (1-5)
-  orientation?: 'horizontal' | 'vertical'; // LED orientation: horizontal (0°) or vertical (90°)
+  targetCount?: number; // target LED count for this character
+  columnCount?: number; // number of columns (1-5)
+  orientation?: 'horizontal' | 'vertical' | 'auto'; // LED orientation
 }
 
-import { selectWellSpacedPoints } from './maximin';
-
-/** Extended LED position with stroke width info for multi-column placement */
-interface LEDPositionWithWidth extends LEDPosition {
-  strokeWidth: number;
-  normalX: number; // Normal vector components for column offset
-  normalY: number;
+interface CenterCandidate extends Point {
+  id: number;
+  pathDist: number;
+  width: number;
+  clearance: number;
+  normal: Point;
+  tangent: Point;
 }
 
-/**
- * Attempts to find the true center of the stroke at a given path point.
- * Returns a centered LED position with stroke width info, or null if measurement fails.
- */
-function findStrokeCenter(
+const LED_RENDER_LENGTH = 12;
+const LED_RENDER_HEIGHT = 5;
+const MAX_COLUMNS = 5;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function radToDeg(value: number): number {
+  return (value * 180) / Math.PI;
+}
+
+function normalize(vec: Point): Point {
+  const len = Math.hypot(vec.x, vec.y);
+  if (len === 0) return { x: 1, y: 0 };
+  return { x: vec.x / len, y: vec.y / len };
+}
+
+function dist(a: Point, b: Point): number {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.hypot(dx, dy);
+}
+
+function calculateTangent(
   pathElement: SVGPathElement,
-  onPath: Point,
-  normal: Point
-): LEDPositionWithWidth | null {
-  // First, move slightly inward (2px) to ensure we're inside the fill
-  const insetDist = 2;
+  distance: number,
+  delta: number = 0.5
+): Point {
+  const totalLength = pathElement.getTotalLength();
+  const d1 = Math.max(0, distance - delta);
+  const d2 = Math.min(totalLength, distance + delta);
+  const p1 = pathElement.getPointAtLength(d1);
+  const p2 = pathElement.getPointAtLength(d2);
+  return normalize({ x: p2.x - p1.x, y: p2.y - p1.y });
+}
 
-  // Try positive normal direction first
-  let testX = onPath.x + normal.x * insetDist;
-  let testY = onPath.y + normal.y * insetDist;
-  let normalDir = 1;
+function estimateTargetCount(pathElement: SVGPathElement, config: PlacementConfig): number {
+  const pathLength = pathElement.getTotalLength();
+  if (pathLength <= 0) return 0;
+
+  const modulesPerFoot = config.targetModule.installation.modulesPerFoot;
+  const pixelsPerInch = config.pixelsPerInch || 12.5;
+  const lengthInInches = pathLength / pixelsPerInch;
+  const lengthInFeet = lengthInInches / 12;
+
+  return Math.max(1, Math.round(lengthInFeet * modulesPerFoot));
+}
+
+function findCenterCandidate(
+  pathElement: SVGPathElement,
+  distance: number,
+  maxDist: number
+): CenterCandidate | null {
+  const onPath = pathElement.getPointAtLength(distance);
+  const tangent = calculateTangent(pathElement, distance);
+  const normal = normalize({ x: -tangent.y, y: tangent.x });
+
+  const inset = 1.5;
+  let testX = onPath.x + normal.x * inset;
+  let testY = onPath.y + normal.y * inset;
+  let dir = normal;
 
   if (!isPointInside(pathElement, testX, testY)) {
-    // Try negative normal direction
-    testX = onPath.x - normal.x * insetDist;
-    testY = onPath.y - normal.y * insetDist;
-    normalDir = -1;
+    testX = onPath.x - normal.x * inset;
+    testY = onPath.y - normal.y * inset;
+    dir = { x: -normal.x, y: -normal.y };
 
     if (!isPointInside(pathElement, testX, testY)) {
-      return null; // Neither direction works
+      return null;
     }
   }
 
-  // Measure stroke width from this inset point
-  const metric = measureStrokeWidth(
-    pathElement,
-    { x: testX, y: testY },
-    { x: normal.x * normalDir, y: normal.y * normalDir }
-  );
+  const distForward = findDistanceToEdge(pathElement, testX, testY, dir.x, dir.y, maxDist);
+  const distBackward = findDistanceToEdge(pathElement, testX, testY, -dir.x, -dir.y, maxDist);
+  const width = distForward + distBackward;
 
-  // Validate the measurement - reject unrealistic values
-  if (metric.width < 6 || metric.width > 200) {
-    return null; // Stroke too thin or measurement invalid
+  if (width < 6) {
+    return null;
   }
 
-  // Calculate center offset: move from current position to true center
-  // rightDist is forward along normal, leftDist is backward
-  // Center is at (rightDist - leftDist) / 2 from current position
-  const centerOffset = (metric.rightDist - metric.leftDist) / 2;
+  const centerOffset = (distForward - distBackward) / 2;
+  const centerX = testX + dir.x * centerOffset;
+  const centerY = testY + dir.y * centerOffset;
 
-  const centerX = testX + normal.x * normalDir * centerOffset;
-  const centerY = testY + normal.y * normalDir * centerOffset;
-
-  // Verify the centered point is still inside the fill
   if (!isPointInside(pathElement, centerX, centerY)) {
     return null;
   }
 
-  const angle = Math.atan2(normal.y * normalDir, normal.x * normalDir) * (180 / Math.PI);
-
   return {
+    id: 0,
     x: centerX,
     y: centerY,
-    rotation: angle,
-    strokeWidth: metric.width,
-    normalX: normal.x * normalDir,
-    normalY: normal.y * normalDir,
+    pathDist: distance,
+    width,
+    clearance: Math.min(distForward, distBackward),
+    normal: dir,
+    tangent,
   };
 }
 
-/**
- * Fallback position finding using fixed offsets (original algorithm).
- * Used when stroke centering fails.
- */
-function findFallbackPosition(
-  pathElement: SVGPathElement,
-  onPath: Point,
-  normal: Point
-): LEDPositionWithWidth | null {
-  const offsets = [3, 6, 10, 15, 20];
+function dedupeCandidates(
+  candidates: CenterCandidate[],
+  cellSize: number
+): CenterCandidate[] {
+  if (candidates.length === 0) return [];
 
-  for (const offset of offsets) {
-    // Try positive normal direction
-    let testX = onPath.x + normal.x * offset;
-    let testY = onPath.y + normal.y * offset;
+  const grid = new Map<string, CenterCandidate[]>();
+  const result: CenterCandidate[] = [];
+  const radius = cellSize * 0.75;
 
-    if (isPointInside(pathElement, testX, testY)) {
-      const angle = Math.atan2(normal.y, normal.x) * (180 / Math.PI);
-      return {
-        x: testX,
-        y: testY,
-        rotation: angle,
-        strokeWidth: offset * 2, // Estimate stroke width based on offset
-        normalX: normal.x,
-        normalY: normal.y,
-      };
-    }
+  const cellKey = (x: number, y: number) => `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
 
-    // Try negative normal direction
-    testX = onPath.x - normal.x * offset;
-    testY = onPath.y - normal.y * offset;
+  for (const cand of candidates) {
+    const cx = Math.floor(cand.x / cellSize);
+    const cy = Math.floor(cand.y / cellSize);
+    let keep = true;
 
-    if (isPointInside(pathElement, testX, testY)) {
-      const angle = Math.atan2(-normal.y, -normal.x) * (180 / Math.PI);
-      return {
-        x: testX,
-        y: testY,
-        rotation: angle,
-        strokeWidth: offset * 2, // Estimate stroke width based on offset
-        normalX: -normal.x,
-        normalY: -normal.y,
-      };
-    }
-  }
-
-  return null;
-}
-
-/**
- * Expands single-column LED positions to multiple columns.
- * Uses the stroke width and normal vector at each position to calculate offsets.
- */
-function expandToMultipleColumns(
-  positions: LEDPositionWithWidth[],
-  columnCount: number,
-  pathElement: SVGPathElement,
-  fixedOrientation?: 'horizontal' | 'vertical'
-): LEDPosition[] {
-  if (columnCount <= 1) {
-    // Candidates are already validated with correct rotation
-    // Just strip the extra width info and return
-    return positions.map(({ x, y, rotation }) => ({ x, y, rotation }));
-  }
-
-  const multiColumnPositions: LEDPosition[] = [];
-
-  for (const pos of positions) {
-    // Calculate column spacing based on stroke width
-    // Use ~65% of measured stroke width for better fill coverage
-    const usableWidth = pos.strokeWidth * 0.65;
-    const columnSpacing = usableWidth / (columnCount - 1);
-
-    for (let col = 0; col < columnCount; col++) {
-      // Offset: -1, 0, +1 for 3 columns; -0.5, +0.5 for 2 columns
-      const offset = (col - (columnCount - 1) / 2) * columnSpacing;
-
-      const newX = pos.x + pos.normalX * offset;
-      const newY = pos.y + pos.normalY * offset;
-
-      // Apply fixed orientation if set, otherwise use path-derived rotation
-      const rotation =
-        fixedOrientation === 'horizontal' ? 0 : fixedOrientation === 'vertical' ? 90 : pos.rotation;
-
-      // Verify the full capsule (center + both endpoints) is inside the stroke
-      const halfLength =
-        fixedOrientation === 'vertical' && pos.strokeWidth < 16
-          ? Math.max(3, pos.strokeWidth / 4)
-          : 6;
-      if (isCapsuleInside(pathElement, newX, newY, rotation, halfLength)) {
-        multiColumnPositions.push({
-          x: newX,
-          y: newY,
-          rotation,
-        });
+    for (let gx = cx - 1; gx <= cx + 1 && keep; gx++) {
+      for (let gy = cy - 1; gy <= cy + 1 && keep; gy++) {
+        const key = `${gx},${gy}`;
+        const bucket = grid.get(key);
+        if (!bucket) continue;
+        for (const existing of bucket) {
+          if (dist(existing, cand) <= radius) {
+            keep = false;
+            break;
+          }
+        }
       }
     }
+
+    if (!keep) continue;
+
+    const key = cellKey(cand.x, cand.y);
+    const bucket = grid.get(key);
+    if (bucket) bucket.push(cand);
+    else grid.set(key, [cand]);
+    result.push(cand);
   }
 
-  return multiColumnPositions;
+  return result;
 }
 
-/**
- * Generates LED positions for a given path using stroke-based distribution.
- * This simulates the "TetraHub" intelligent layout.
- */
+function buildChains(
+  candidates: CenterCandidate[],
+  breakThreshold: number
+): CenterCandidate[][] {
+  if (candidates.length === 0) return [];
+  const chains: CenterCandidate[][] = [];
+  let current: CenterCandidate[] = [candidates[0]];
+
+  for (let i = 1; i < candidates.length; i++) {
+    const prev = candidates[i - 1];
+    const curr = candidates[i];
+    if (dist(prev, curr) > breakThreshold) {
+      if (current.length > 0) chains.push(current);
+      current = [curr];
+    } else {
+      current.push(curr);
+    }
+  }
+
+  if (current.length > 0) chains.push(current);
+  return chains;
+}
+
+function chainLength(chain: CenterCandidate[]): number {
+  if (chain.length < 2) return 0;
+  let length = 0;
+  for (let i = 1; i < chain.length; i++) {
+    length += dist(chain[i - 1], chain[i]);
+  }
+  return length;
+}
+
+function allocateCountsByLength(lengths: number[], total: number): number[] {
+  const count = lengths.length;
+  if (count === 0) return [];
+  if (total <= 0) return new Array(count).fill(0);
+
+  const totalLength = lengths.reduce((sum, v) => sum + v, 0);
+  if (totalLength <= 0) {
+    const base = Math.floor(total / count);
+    let remainder = total % count;
+    return lengths.map(() => base + (remainder-- > 0 ? 1 : 0));
+  }
+
+  const raw = lengths.map((len) => (len / totalLength) * total);
+  const counts = raw.map((v) => Math.floor(v));
+  let remainder = total - counts.reduce((sum, v) => sum + v, 0);
+
+  const order = raw
+    .map((value, index) => ({ index, frac: value - Math.floor(value) }))
+    .sort((a, b) => b.frac - a.frac);
+
+  for (const item of order) {
+    if (remainder <= 0) break;
+    counts[item.index] += 1;
+    remainder -= 1;
+  }
+
+  return counts;
+}
+
+function pickEvenly(chain: CenterCandidate[], count: number): CenterCandidate[] {
+  if (count <= 0) return [];
+  if (chain.length <= count) return [...chain];
+  if (chain.length === 1) return [chain[0]];
+
+  const cumulative: number[] = [0];
+  for (let i = 1; i < chain.length; i++) {
+    cumulative[i] = cumulative[i - 1] + dist(chain[i - 1], chain[i]);
+  }
+  const totalLength = cumulative[cumulative.length - 1];
+  if (totalLength === 0) {
+    const step = (chain.length - 1) / count;
+    const result: CenterCandidate[] = [];
+    for (let i = 0; i < count; i++) {
+      const idx = Math.round(i * step);
+      result.push(chain[idx]);
+    }
+    return result;
+  }
+
+  const step = totalLength / count;
+  const used = new Set<number>();
+  const result: CenterCandidate[] = [];
+  let cursor = 0;
+
+  for (let i = 0; i < count; i++) {
+    const target = step * (i + 0.5);
+    while (cursor < cumulative.length - 1 && cumulative[cursor] < target) {
+      cursor += 1;
+    }
+
+    let best = cursor;
+    if (cursor > 0) {
+      const prev = cursor - 1;
+      const prevDist = Math.abs(cumulative[prev] - target);
+      const currDist = Math.abs(cumulative[cursor] - target);
+      best = currDist <= prevDist ? cursor : prev;
+    }
+
+    let chosen = best;
+    if (used.has(chosen)) {
+      let left = best - 1;
+      let right = best + 1;
+      while (left >= 0 || right < chain.length) {
+        if (left >= 0 && !used.has(left)) {
+          chosen = left;
+          break;
+        }
+        if (right < chain.length && !used.has(right)) {
+          chosen = right;
+          break;
+        }
+        left -= 1;
+        right += 1;
+      }
+    }
+
+    used.add(chosen);
+    result.push(chain[chosen]);
+  }
+
+  return result;
+}
+
+function generateCenterlineCandidates(
+  pathElement: SVGPathElement,
+  targetCount: number
+): { candidates: CenterCandidate[]; step: number } {
+  const pathLength = pathElement.getTotalLength();
+  if (pathLength <= 0) return { candidates: [], step: 0 };
+
+  const step = clamp(pathLength / (targetCount * 12), 1.5, 4);
+  const maxDist = pathLength * 0.5;
+  const candidates: CenterCandidate[] = [];
+
+  let id = 0;
+  for (let distAlong = 0; distAlong <= pathLength; distAlong += step) {
+    const candidate = findCenterCandidate(pathElement, distAlong, maxDist);
+    if (!candidate) continue;
+    candidate.id = id;
+    candidates.push(candidate);
+    id += 1;
+  }
+
+  const deduped = dedupeCandidates(candidates, step * 0.9);
+  return { candidates: deduped, step };
+}
+
+function selectBasePositions(
+  candidates: CenterCandidate[],
+  step: number,
+  count: number
+): CenterCandidate[] {
+  if (candidates.length === 0 || count <= 0) return [];
+  if (candidates.length <= count) return [...candidates];
+
+  const breakThreshold = Math.max(step * 4, LED_RENDER_LENGTH * 1.25);
+  const chains = buildChains(candidates, breakThreshold);
+  const lengths = chains.map((chain) => chainLength(chain));
+  const allocations = allocateCountsByLength(lengths, count);
+
+  const result: CenterCandidate[] = [];
+  for (let i = 0; i < chains.length; i++) {
+    const take = allocations[i];
+    if (take <= 0) continue;
+    result.push(...pickEvenly(chains[i], take));
+  }
+
+  return result;
+}
+
+function buildColumnOffsets(columnCount: number): number[] {
+  if (columnCount <= 1) return [0];
+
+  const center = (columnCount - 1) / 2;
+  const offsets: number[] = [];
+  for (let i = 0; i < columnCount; i++) {
+    offsets.push(i - center);
+  }
+
+  offsets.sort((a, b) => Math.abs(a) - Math.abs(b));
+  return offsets;
+}
+
+function expandColumns(
+  pathElement: SVGPathElement,
+  basePositions: CenterCandidate[],
+  targetCount: number,
+  columnCount: number,
+  orientation: 'horizontal' | 'vertical' | 'auto'
+): LEDPosition[] {
+  const positions: LEDPosition[] = [];
+  const halfLength = LED_RENDER_LENGTH / 2;
+  const usableColumnOffsets = buildColumnOffsets(columnCount);
+
+  for (const base of basePositions) {
+    if (positions.length >= targetCount) break;
+
+    const usableWidth = Math.max(LED_RENDER_HEIGHT * 1.25, base.width * 0.65);
+    const spacing = columnCount > 1 ? usableWidth / (columnCount - 1) : 0;
+
+    let rotation = 0;
+    if (orientation === 'horizontal') rotation = 0;
+    else if (orientation === 'vertical') rotation = 90;
+    else rotation = radToDeg(Math.atan2(base.tangent.y, base.tangent.x));
+
+    for (const offsetIndex of usableColumnOffsets) {
+      if (positions.length >= targetCount) break;
+
+      const offset = offsetIndex * spacing;
+      let x = base.x + base.normal.x * offset;
+      let y = base.y + base.normal.y * offset;
+
+      let fits = isCapsuleInside(pathElement, x, y, rotation, halfLength * 0.9);
+
+      if (!fits && Math.abs(offset) > 0.1) {
+        const shrink = 0.75;
+        x = base.x + base.normal.x * offset * shrink;
+        y = base.y + base.normal.y * offset * shrink;
+        fits = isCapsuleInside(pathElement, x, y, rotation, halfLength * 0.85);
+      }
+
+      if (!fits && !isPointInside(pathElement, x, y)) {
+        continue;
+      }
+
+      positions.push({ x, y, rotation });
+    }
+  }
+
+  return positions;
+}
+
 export function generateLEDPositions(
   pathElement: SVGPathElement,
   config: PlacementConfig
 ): LEDPosition[] {
-  const pathLength = pathElement.getTotalLength();
-  if (pathLength === 0) return [];
+  if (!pathElement) return [];
 
-  // 1. Configuration - Aggressive density for visual appeal
-  // modulesPerFoot affects relative density (more modules/foot = denser placement)
-  const baseSpacing = 12; // Tighter base spacing for more LEDs
-  const densityFactor = config.targetModule.installation.modulesPerFoot / 3;
-  const minSpacingPx = Math.max(8, baseSpacing / densityFactor); // Minimum 8px between LEDs
+  const targetCount =
+    config.targetCount && config.targetCount > 0
+      ? config.targetCount
+      : estimateTargetCount(pathElement, config);
 
-  // Sample resolution: very fine to capture all curves
-  const samplingStepPx = 2;
+  if (!targetCount || targetCount <= 0) return [];
 
-  const candidates: LEDPositionWithWidth[] = [];
-  const numSteps = Math.floor(pathLength / samplingStepPx);
+  const columnCount = clamp(config.columnCount ?? 1, 1, MAX_COLUMNS);
+  const orientation = config.orientation ?? 'auto';
 
-  for (let i = 0; i < numSteps; i++) {
-    const dist = i * samplingStepPx;
-    const onPath = pathElement.getPointAtLength(dist);
-    const normal = calculateNormal(pathElement, dist);
+  const { candidates, step } = generateCenterlineCandidates(pathElement, targetCount);
+  if (candidates.length === 0) return [];
 
-    // 2. Stroke-Centered Placement: Try to find the true center of the stroke
-    const centeredPos = findStrokeCenter(pathElement, onPath, normal);
+  const baseCount = Math.ceil(targetCount / columnCount);
+  const basePositions = selectBasePositions(candidates, step, baseCount);
+  if (basePositions.length === 0) return [];
 
-    if (centeredPos) {
-      candidates.push(centeredPos);
-    } else {
-      // Fall back to fixed-offset method if stroke centering fails
-      const fallbackPos = findFallbackPosition(pathElement, onPath, normal);
-      if (fallbackPos) {
-        candidates.push(fallbackPos);
-      }
-    }
-  }
+  const expanded = expandColumns(
+    pathElement,
+    basePositions,
+    targetCount,
+    columnCount,
+    orientation
+  );
 
-  // 3. If we got very few candidates, fall back to path-following placement
-  if (candidates.length < 10) {
-    const fallbackSpacing = Math.max(15, pathLength / 50); // At least 50 LEDs or 15px apart
-    const fallbackCount = Math.floor(pathLength / fallbackSpacing);
-
-    for (let i = 0; i < fallbackCount; i++) {
-      const dist = (i + 0.5) * fallbackSpacing;
-      const pt = pathElement.getPointAtLength(dist);
-      const normal = calculateNormal(pathElement, dist);
-      const angle = Math.atan2(normal.y, normal.x) * (180 / Math.PI);
-
-      // Offset slightly inward
-      const inset = 5;
-      let cx = pt.x + normal.x * inset;
-      let cy = pt.y + normal.y * inset;
-      let normX = normal.x;
-      let normY = normal.y;
-
-      if (!isPointInside(pathElement, cx, cy)) {
-        cx = pt.x - normal.x * inset;
-        cy = pt.y - normal.y * inset;
-        normX = -normal.x;
-        normY = -normal.y;
-      }
-
-      // If still not inside, use the path point directly
-      if (!isPointInside(pathElement, cx, cy)) {
-        cx = pt.x;
-        cy = pt.y;
-      }
-
-      candidates.push({
-        x: cx,
-        y: cy,
-        rotation: angle,
-        strokeWidth: inset * 4, // Estimate for fallback
-        normalX: normX,
-        normalY: normY,
-      });
-    }
-  }
-
-  // 4. Apply orientation and filter candidates BEFORE spacing selection
-  // This ensures we only select from candidates that will actually fit with the chosen orientation
-  const columnCount = config.columnCount ?? 1;
-  const orientation = config.orientation; // undefined = follow stroke, 'horizontal' = 0°, 'vertical' = 90°
-
-  // Apply fixed orientation to all candidates and filter those that don't fit
-  const orientedCandidates = candidates
-    .map((c) => ({
-      ...c,
-      rotation: orientation === 'horizontal' ? 0 : orientation === 'vertical' ? 90 : c.rotation,
-    }))
-    .filter((c) => {
-      // Use adaptive halfLength for vertical orientation on narrow strokes
-      const halfLength =
-        orientation === 'vertical' && c.strokeWidth < 16 ? Math.max(3, c.strokeWidth / 4) : 6;
-      return isCapsuleInside(pathElement, c.x, c.y, c.rotation, halfLength);
-    });
-
-  // If no candidates fit with the new orientation, fall back to original candidates
-  const validCandidates = orientedCandidates.length > 0 ? orientedCandidates : candidates;
-
-  // 5. Optimize Spacing (Maximin) - use slightly relaxed spacing for fallback paths
-  // If targetCount is specified, adjust spacing to achieve target LED count
-  if (config.targetCount && config.targetCount > 0) {
-    // Adjust target count for single column (will be expanded later)
-    const singleColumnTarget = Math.ceil(config.targetCount / columnCount);
-
-    // Calculate spacing that would yield approximately targetCount LEDs
-    const targetSpacing = estimateSpacingForCount(
-      validCandidates,
-      singleColumnTarget,
-      minSpacingPx
-    );
-    const selectedIndices = selectWellSpacedPoints(validCandidates, targetSpacing);
-
-    // Get the selected positions
-    let selectedPositions = selectedIndices.map((i) => validCandidates[i]);
-    if (selectedPositions.length > singleColumnTarget) {
-      // Evenly subsample to get exact target count
-      selectedPositions = evenlySubsampleWithWidth(selectedPositions, singleColumnTarget);
-    }
-
-    // Expand to multiple columns (candidates already validated for single column)
-    return expandToMultipleColumns(selectedPositions, columnCount, pathElement, orientation);
-  }
-
-  const effectiveSpacing = validCandidates.length < 20 ? minSpacingPx * 0.7 : minSpacingPx;
-  const selectedIndices = selectWellSpacedPoints(validCandidates, effectiveSpacing);
-
-  const selectedPositions = selectedIndices.map((i) => validCandidates[i]);
-
-  // Expand to multiple columns (candidates already validated for single column)
-  return expandToMultipleColumns(selectedPositions, columnCount, pathElement, orientation);
-}
-
-/**
- * Estimate the spacing needed to achieve approximately targetCount LEDs
- */
-function estimateSpacingForCount(
-  candidates: LEDPosition[],
-  targetCount: number,
-  baseSpacing: number
-): number {
-  if (candidates.length <= targetCount) {
-    return 0; // Use all candidates
-  }
-
-  // Binary search for the right spacing
-  let low = 0;
-  let high = baseSpacing * 4;
-  let bestSpacing = baseSpacing;
-
-  for (let iter = 0; iter < 20; iter++) {
-    const mid = (low + high) / 2;
-    const count = selectWellSpacedPoints(candidates, mid).length;
-
-    if (count === targetCount) {
-      return mid;
-    } else if (count > targetCount) {
-      low = mid;
-      bestSpacing = mid;
-    } else {
-      high = mid;
-    }
-  }
-
-  return bestSpacing;
-}
-
-/**
- * Evenly subsample an array of LEDPositionWithWidth to get exactly targetCount items
- */
-function evenlySubsampleWithWidth(
-  items: LEDPositionWithWidth[],
-  targetCount: number
-): LEDPositionWithWidth[] {
-  if (items.length <= targetCount) return items;
-
-  const result: LEDPositionWithWidth[] = [];
-  const step = (items.length - 1) / (targetCount - 1);
-
-  for (let i = 0; i < targetCount; i++) {
-    const index = Math.round(i * step);
-    result.push(items[index]);
-  }
-
-  return result;
+  return expanded;
 }
