@@ -15,7 +15,6 @@ const ROTATE_ARROW_PATH =
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
 
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 const createLedId = () => {
@@ -56,37 +55,6 @@ const zoomViewBox = (viewBox: ViewBox, factor: number, anchor: { x: number; y: n
   };
 };
 
-/** Find a point inside the path where an LED capsule can be placed (for "Add LED" when center is in a hole). */
-function findPointInsidePath(
-  pathElement: SVGPathElement,
-  localBounds: { x: number; y: number; width: number; height: number }
-): { x: number; y: number } | null {
-  const cx = localBounds.x + localBounds.width / 2;
-  const cy = localBounds.y + localBounds.height / 2;
-  const w = localBounds.width;
-  const h = localBounds.height;
-  const step = Math.max(w, h) * 0.2;
-  const candidates: Array<{ x: number; y: number }> = [
-    { x: cx, y: cy },
-    { x: cx - step, y: cy },
-    { x: cx + step, y: cy },
-    { x: cx, y: cy - step },
-    { x: cx, y: cy + step },
-    { x: cx - step, y: cy - step },
-    { x: cx + step, y: cy - step },
-    { x: cx - step, y: cy + step },
-    { x: cx + step, y: cy + step },
-    { x: cx - w * 0.35, y: cy },
-    { x: cx + w * 0.35, y: cy },
-    { x: cx, y: cy - h * 0.35 },
-    { x: cx, y: cy + h * 0.35 },
-  ];
-  for (const p of candidates) {
-    if (isCapsuleInside(pathElement, p.x, p.y, 0, 6)) return p;
-  }
-  return null;
-}
-
 export const ManualDesignerPage: React.FC = () => {
   const blocks = useProjectStore((state) => state.blocks);
   const editorCharId = useProjectStore((state) => state.editorCharId);
@@ -96,8 +64,10 @@ export const ManualDesignerPage: React.FC = () => {
   const setCharManualLeds = useProjectStore((state) => state.setCharManualLeds);
   const currentModule = useProjectStore((state) => state.getCurrentModule());
 
-  const [snapEnabled, setSnapEnabled] = useState(false);
-  const [gridSize, setGridSize] = useState(2);
+  const [snapEnabled] = useState(false);
+  const [gridSize] = useState(2);
+  const [tool, setTool] = useState<'select' | 'pan' | 'add'>('select');
+  const [isPanning, setIsPanning] = useState(false);
   const [selectedLedId, setSelectedLedId] = useState<string | null>(null);
   const [draftLeds, setDraftLeds] = useState<ManualLED[]>([]);
   const [viewBox, setViewBox] = useState<ViewBox | null>(null);
@@ -106,6 +76,7 @@ export const ManualDesignerPage: React.FC = () => {
   const [invalidLedIds, setInvalidLedIds] = useState<Set<string>>(new Set());
 
   const svgRef = useRef<SVGSVGElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const dragRef = useRef<{
     pointerId: number;
@@ -176,10 +147,12 @@ export const ManualDesignerPage: React.FC = () => {
   useEffect(() => {
     if (!editorCharId) return;
     const initial = getCharManualLeds(editorCharId);
-    setDraftLeds(initial.map((led) => ({ ...led })));
-    setSelectedLedId(null);
-    setIsDirty(false);
-    setInvalidLedIds(new Set());
+    queueMicrotask(() => {
+      setDraftLeds(initial.map((led) => ({ ...led })));
+      setSelectedLedId(null);
+      setIsDirty(false);
+      setInvalidLedIds(new Set());
+    });
   }, [editorCharId, getCharManualLeds]);
 
   useLayoutEffect(() => {
@@ -207,8 +180,10 @@ export const ManualDesignerPage: React.FC = () => {
     if (!source) return;
     const local = { x: 0, y: 0, width: source.width, height: source.height };
     const base = expandBox(local);
-    setBaseViewBox(base);
-    setViewBox(base);
+    queueMicrotask(() => {
+      setBaseViewBox(base);
+      setViewBox(base);
+    });
   }, [bbox, pathBounds]);
 
   const clampViewBoxToBase = useCallback(
@@ -229,6 +204,28 @@ export const ManualDesignerPage: React.FC = () => {
     },
     [baseViewBox]
   );
+
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container || !viewBox) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const svg = svgRef.current;
+      if (!svg) return;
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const transformed = pt.matrixTransform(ctm.inverse());
+      const point = { x: transformed.x, y: transformed.y };
+      const factor = e.deltaY > 0 ? 1.03 : 0.97;
+      const next = zoomViewBox(viewBox, factor, point);
+      setViewBox(clampViewBoxToBase(next));
+    };
+    container.addEventListener('wheel', handler, { passive: false });
+    return () => container.removeEventListener('wheel', handler);
+  }, [viewBox, clampViewBoxToBase]);
 
   const localBounds = useMemo(() => {
     const source = pathBounds || bbox;
@@ -256,7 +253,10 @@ export const ManualDesignerPage: React.FC = () => {
       let scale = led.scale ?? 1;
       const leg = led as ManualLED & { width?: number; height?: number };
       if (scale === 1 && (leg.width != null || leg.height != null))
-        scale = ((leg.width ?? BASE_LED_WIDTH) / BASE_LED_WIDTH + (leg.height ?? BASE_LED_HEIGHT) / BASE_LED_HEIGHT) / 2;
+        scale =
+          ((leg.width ?? BASE_LED_WIDTH) / BASE_LED_WIDTH +
+            (leg.height ?? BASE_LED_HEIGHT) / BASE_LED_HEIGHT) /
+          2;
       const w = BASE_LED_WIDTH * scale;
       const h = BASE_LED_HEIGHT * scale;
       return {
@@ -320,19 +320,6 @@ export const ManualDesignerPage: React.FC = () => {
     return set;
   }, [absoluteLeds, ledStacks]);
 
-  const selectedStack = useMemo(() => {
-    if (!selectedLedId) return null;
-    return ledStacks.find((s) => s.includes(selectedLedId)) ?? null;
-  }, [ledStacks, selectedLedId]);
-
-  const handleSelectNextInStack = useCallback(() => {
-    if (!selectedStack || selectedStack.length < 2) return;
-    const i = selectedStack.indexOf(selectedLedId ?? '');
-    if (i < 0) return;
-    const next = selectedStack[(i + 1) % selectedStack.length];
-    setSelectedLedId(next);
-  }, [selectedLedId, selectedStack]);
-
   const getSvgPoint = useCallback((event: React.PointerEvent<SVGElement>) => {
     const svg = svgRef.current;
     if (!svg) return null;
@@ -367,11 +354,36 @@ export const ManualDesignerPage: React.FC = () => {
     [localBounds]
   );
 
+  const addLedAtPoint = useCallback(
+    (point: { x: number; y: number }, rotation = 0, forceInsideBounds = false, scale?: number) => {
+      if (!localBounds) return;
+      if (!pathRef.current && !forceInsideBounds) return;
+      const snapped = snapPoint(point);
+      if (
+        !forceInsideBounds &&
+        pathRef.current &&
+        !isCapsuleInside(pathRef.current, snapped.x, snapped.y, rotation, 6)
+      ) {
+        return;
+      }
+      const normalized = toManual(snapped);
+      const newLed: ManualLED = {
+        id: createLedId(),
+        u: normalized.u,
+        v: normalized.v,
+        rotation,
+        ...(scale != null && scale !== 1 && { scale }),
+      };
+      setDraftLeds((prev) => [...prev, newLed]);
+      setSelectedLedId(newLed.id);
+      setIsDirty(true);
+    },
+    [localBounds, snapPoint, toManual]
+  );
+
   const handleLedPointerDown = useCallback(
     (event: React.PointerEvent<SVGGElement>, ledId: string, ledX: number, ledY: number) => {
       event.stopPropagation();
-      const point = getSvgPoint(event);
-      if (!point) return;
       setInvalidLedIds((prev) => {
         if (!prev.has(ledId)) return prev;
         const next = new Set(prev);
@@ -379,6 +391,8 @@ export const ManualDesignerPage: React.FC = () => {
         return next;
       });
       setSelectedLedId(ledId);
+      const point = getSvgPoint(event);
+      if (!point) return;
       dragRef.current = {
         pointerId: event.pointerId,
         ledId,
@@ -499,9 +513,7 @@ export const ManualDesignerPage: React.FC = () => {
           break;
       }
       setDraftLeds((prev) =>
-        prev.map((l) =>
-          l.id === resize.ledId ? { ...l, u: newU, v: newV, scale: newScale } : l
-        )
+        prev.map((l) => (l.id === resize.ledId ? { ...l, u: newU, v: newV, scale: newScale } : l))
       );
       setIsDirty(true);
     },
@@ -569,19 +581,26 @@ export const ManualDesignerPage: React.FC = () => {
       const onRotationHandle = Boolean(target?.closest('[data-rotation-handle]'));
       const onLed = Boolean(target && target.closest('[data-led]'));
       if (!onResizeHandle && !onRotationHandle && !onLed) {
-        setSelectedLedId(null);
-        if (!viewBox) return;
         const point = getSvgPoint(event);
         if (!point) return;
-        panRef.current = {
-          pointerId: event.pointerId,
-          start: point,
-          viewBox,
-        };
-        event.currentTarget.setPointerCapture(event.pointerId);
+        if (tool === 'add') {
+          addLedAtPoint(point, 0, true);
+          return;
+        }
+        setSelectedLedId(null);
+        if (!viewBox) return;
+        if (tool === 'select' || tool === 'pan') {
+          panRef.current = {
+            pointerId: event.pointerId,
+            start: point,
+            viewBox,
+          };
+          setIsPanning(true);
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }
       }
     },
-    [getSvgPoint, viewBox]
+    [getSvgPoint, tool, viewBox, addLedAtPoint]
   );
 
   const handleCanvasPointerMove = useCallback(
@@ -620,37 +639,28 @@ export const ManualDesignerPage: React.FC = () => {
     ]
   );
 
-  const handleCanvasPointerUp = useCallback((event: React.PointerEvent<SVGElement>) => {
-    if (resizeRef.current && event.pointerId === resizeRef.current.pointerId) {
-      handleResizePointerUp(event);
-      return;
-    }
-    if (rotateRef.current && event.pointerId === rotateRef.current.pointerId) {
-      handleRotationHandlePointerUp(event);
-      return;
-    }
-    if (dragRef.current && event.pointerId === dragRef.current.pointerId) {
-      handleLedPointerUp(event as unknown as React.PointerEvent<SVGGElement>);
-      return;
-    }
-    const pan = panRef.current;
-    if (pan && event.pointerId === pan.pointerId) {
-      panRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, [handleLedPointerUp, handleResizePointerUp, handleRotationHandlePointerUp]);
-
-  const handleWheel = useCallback(
-    (event: React.WheelEvent<SVGElement>) => {
-      if (!viewBox) return;
-      event.preventDefault();
-      const point = getSvgPoint(event as unknown as React.PointerEvent<SVGElement>);
-      if (!point) return;
-      const factor = event.deltaY > 0 ? 1.03 : 0.97;
-      const next = zoomViewBox(viewBox, factor, point);
-      setViewBox(clampViewBoxToBase(next));
+  const handleCanvasPointerUp = useCallback(
+    (event: React.PointerEvent<SVGElement>) => {
+      if (resizeRef.current && event.pointerId === resizeRef.current.pointerId) {
+        handleResizePointerUp(event);
+        return;
+      }
+      if (rotateRef.current && event.pointerId === rotateRef.current.pointerId) {
+        handleRotationHandlePointerUp(event);
+        return;
+      }
+      if (dragRef.current && event.pointerId === dragRef.current.pointerId) {
+        handleLedPointerUp(event as unknown as React.PointerEvent<SVGGElement>);
+        return;
+      }
+      const pan = panRef.current;
+      if (pan && event.pointerId === pan.pointerId) {
+        panRef.current = null;
+        setIsPanning(false);
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
     },
-    [clampViewBoxToBase, getSvgPoint, viewBox]
+    [handleLedPointerUp, handleResizePointerUp, handleRotationHandlePointerUp]
   );
 
   const handleZoomIn = useCallback(() => {
@@ -665,53 +675,16 @@ export const ManualDesignerPage: React.FC = () => {
     setViewBox(baseViewBox);
   }, [baseViewBox]);
 
-  const addLedAtPoint = useCallback(
-    (
-      point: { x: number; y: number },
-      rotation = 0,
-      forceInsideBounds = false,
-      scale?: number
-    ) => {
-      if (!localBounds) return;
-      if (!pathRef.current && !forceInsideBounds) return;
-      const snapped = snapPoint(point);
-      if (
-        !forceInsideBounds &&
-        pathRef.current &&
-        !isCapsuleInside(pathRef.current, snapped.x, snapped.y, rotation, 6)
-      ) {
-        return;
-      }
-      const normalized = toManual(snapped);
-      const newLed: ManualLED = {
-        id: createLedId(),
-        u: normalized.u,
-        v: normalized.v,
-        rotation,
-        ...(scale != null && scale !== 1 && { scale }),
-      };
-      setDraftLeds((prev) => [...prev, newLed]);
-      setSelectedLedId(newLed.id);
-      setIsDirty(true);
-    },
-    [localBounds, snapPoint, toManual]
-  );
-
   const handleAddAtCenter = useCallback(() => {
     if (!localBounds) return;
-    const center = {
-      x: localBounds.x + localBounds.width / 2,
-      y: localBounds.y + localBounds.height / 2,
-    };
-    if (pathRef.current) {
-      const point = findPointInsidePath(pathRef.current, localBounds);
-      if (point) {
-        addLedAtPoint(point);
-        return;
-      }
-    }
+    const center = viewBox
+      ? { x: viewBox.x + viewBox.width / 2, y: viewBox.y + viewBox.height / 2 }
+      : {
+          x: localBounds.x + localBounds.width / 2,
+          y: localBounds.y + localBounds.height / 2,
+        };
     addLedAtPoint(center, 0, true);
-  }, [addLedAtPoint, localBounds]);
+  }, [addLedAtPoint, localBounds, viewBox]);
 
   const handleDuplicateSelected = useCallback(() => {
     if (!localBounds || !selectedLedId) return;
@@ -731,38 +704,10 @@ export const ManualDesignerPage: React.FC = () => {
     setIsDirty(true);
   }, []);
 
-  const handleBringToFront = useCallback(() => {
+  const handleDeleteSelected = useCallback(() => {
     if (!selectedLedId) return;
-    setDraftLeds((prev) => {
-      const i = prev.findIndex((led) => led.id === selectedLedId);
-      if (i < 0 || i === prev.length - 1) return prev;
-      const next = [...prev];
-      const [removed] = next.splice(i, 1);
-      next.push(removed);
-      return next;
-    });
-    setIsDirty(true);
-  }, [selectedLedId]);
-
-  const handleSendToBack = useCallback(() => {
-    if (!selectedLedId) return;
-    setDraftLeds((prev) => {
-      const i = prev.findIndex((led) => led.id === selectedLedId);
-      if (i <= 0) return prev;
-      const next = [...prev];
-      const [removed] = next.splice(i, 1);
-      next.unshift(removed);
-      return next;
-    });
-    setIsDirty(true);
-  }, [selectedLedId]);
-
-  const handleSetSelectedScale = useCallback((scale: number) => {
-    if (!selectedLedId) return;
-    const s = Math.max(0.5, Math.min(3, scale));
-    setDraftLeds((prev) =>
-      prev.map((led) => (led.id === selectedLedId ? { ...led, scale: s } : led))
-    );
+    setDraftLeds((prev) => prev.filter((led) => led.id !== selectedLedId));
+    setSelectedLedId(null);
     setIsDirty(true);
   }, [selectedLedId]);
 
@@ -778,12 +723,7 @@ export const ManualDesignerPage: React.FC = () => {
     const failedIds = new Set<string>();
 
     for (const led of draftLeds) {
-      if (
-        led.u < -margin ||
-        led.u > 1 + margin ||
-        led.v < -margin ||
-        led.v > 1 + margin
-      ) {
+      if (led.u < -margin || led.u > 1 + margin || led.v < -margin || led.v > 1 + margin) {
         failedIds.add(led.id);
         continue;
       }
@@ -828,8 +768,19 @@ export const ManualDesignerPage: React.FC = () => {
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950 text-slate-100">
-      <div className="flex h-full min-h-0">
+    <div className="fixed inset-0 z-50 text-slate-100">
+      <div
+        className="absolute inset-0 pointer-events-none bg-slate-950"
+        style={{
+          backgroundImage: `
+            linear-gradient(rgba(148,163,184,0.12) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(148,163,184,0.12) 1px, transparent 1px)
+          `,
+          backgroundSize: '10px 10px',
+        }}
+        aria-hidden
+      />
+      <div className="relative z-10 flex h-full min-h-0">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="h-16 shrink-0 border-b border-slate-800 flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
@@ -861,7 +812,18 @@ export const ManualDesignerPage: React.FC = () => {
           </div>
 
           <div className="flex-1 grid grid-cols-[1fr_320px] min-h-0">
-            <div className="relative bg-slate-950 flex items-center justify-center min-h-0 min-w-0">
+            <div
+              ref={canvasContainerRef}
+              className={`relative flex items-center justify-center min-h-0 min-w-0 ${
+                tool === 'pan' && isPanning
+                  ? 'cursor-grabbing'
+                  : tool === 'pan'
+                    ? 'cursor-grab'
+                    : tool === 'add'
+                      ? 'cursor-crosshair'
+                      : ''
+              }`}
+            >
               {loading && (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-400">
                   Loading font engine...
@@ -877,19 +839,7 @@ export const ManualDesignerPage: React.FC = () => {
                   onPointerDown={handleCanvasPointerDown}
                   onPointerMove={handleCanvasPointerMove}
                   onPointerUp={handleCanvasPointerUp}
-                  onWheel={handleWheel}
                 >
-                  <defs>
-                    <pattern id="designGrid" width="10" height="10" patternUnits="userSpaceOnUse">
-                      <path
-                        d="M 10 0 L 0 0 0 10"
-                        fill="none"
-                        stroke="rgba(148,163,184,0.12)"
-                        strokeWidth="0.5"
-                      />
-                    </pattern>
-                  </defs>
-                  <rect width="100%" height="100%" fill="url(#designGrid)" />
                   <path
                     ref={pathRef}
                     d={charPath?.pathData || ''}
@@ -906,8 +856,7 @@ export const ManualDesignerPage: React.FC = () => {
                     const halfH = h / 2;
                     const stackCount = stackCountByLedId.get(led.id) ?? 1;
                     const inStack = stackCount > 1;
-                    const showStackIndicator =
-                      inStack && topmostLedIdPerStack.has(led.id);
+                    const showStackIndicator = inStack && topmostLedIdPerStack.has(led.id);
                     const isInvalid = invalidLedIds.has(led.id);
                     const strokeColor = isInvalid ? '#dc2626' : '#38bdf8';
                     const circleFill = isInvalid ? '#dc2626' : '#38bdf8';
@@ -917,9 +866,7 @@ export const ManualDesignerPage: React.FC = () => {
                         data-led
                         transform={`rotate(${led.rotation} ${led.x} ${led.y})`}
                         style={{ cursor: 'move' }}
-                        onPointerDown={(event) =>
-                          handleLedPointerDown(event, led.id, led.x, led.y)
-                        }
+                        onPointerDown={(event) => handleLedPointerDown(event, led.id, led.x, led.y)}
                         onPointerMove={handleLedPointerMove}
                         onPointerUp={handleLedPointerUp}
                       >
@@ -947,6 +894,75 @@ export const ManualDesignerPage: React.FC = () => {
                             strokeWidth={1}
                           />
                         )}
+                        {/* Resize handles — always present so you can resize without selecting first */}
+                        {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
+                          const hx =
+                            handle === 'nw' || handle === 'sw'
+                              ? led.x - halfW - 2
+                              : led.x + halfW - 2;
+                          const hy =
+                            handle === 'nw' || handle === 'ne'
+                              ? led.y - halfH - 2
+                              : led.y + halfH - 2;
+                          return (
+                            <rect
+                              key={handle}
+                              data-resize-handle
+                              x={hx}
+                              y={hy}
+                              width={4}
+                              height={4}
+                              fill="transparent"
+                              style={{ cursor: 'nwse-resize', pointerEvents: 'all' }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                setSelectedLedId(led.id);
+                                handleResizePointerDown(
+                                  e as unknown as React.PointerEvent<SVGElement>,
+                                  led.id,
+                                  handle
+                                );
+                              }}
+                            />
+                          );
+                        })}
+                        {/* Rotation handle — always present so you can rotate without selecting first */}
+                        {(() => {
+                          const iconScale = Math.max(2, Math.min(3.5, w * 0.2));
+                          const iconY = led.y - halfH - iconScale - 3;
+                          const s = (iconScale * 2) / ROTATE_ARROW_VIEWBOX_SIZE;
+                          return (
+                            <g
+                              data-rotation-handle
+                              transform={`translate(${led.x}, ${iconY}) scale(${s}) translate(${-ROTATE_ARROW_VIEWBOX_CENTER}, ${-ROTATE_ARROW_VIEWBOX_CENTER})`}
+                              style={{ cursor: 'grab', pointerEvents: 'all' }}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                setSelectedLedId(led.id);
+                                handleRotationHandlePointerDown(
+                                  e as unknown as React.PointerEvent<SVGElement>,
+                                  led.id,
+                                  led.x,
+                                  led.y
+                                );
+                              }}
+                            >
+                              <circle
+                                cx={ROTATE_ARROW_VIEWBOX_CENTER}
+                                cy={ROTATE_ARROW_VIEWBOX_CENTER}
+                                r={ROTATE_ARROW_VIEWBOX_CENTER}
+                                fill="transparent"
+                              />
+                              <path
+                                d={ROTATE_ARROW_PATH}
+                                fill={selected ? '#60a5fa' : 'transparent'}
+                                stroke={selected ? '#e2e8f0' : 'transparent'}
+                                strokeWidth={8}
+                                strokeLinejoin="round"
+                              />
+                            </g>
+                          );
+                        })()}
                         <rect
                           x={led.x - halfW}
                           y={led.y - halfH}
@@ -958,12 +974,20 @@ export const ManualDesignerPage: React.FC = () => {
                           stroke={strokeColor}
                           strokeWidth={isInvalid ? 1.2 : 0.9}
                         />
-                        <circle cx={led.x - w * 0.29} cy={led.y} r={Math.min(1.2, h * 0.24)} fill={circleFill} />
-                        <circle cx={led.x + w * 0.29} cy={led.y} r={Math.min(1.2, h * 0.24)} fill={circleFill} />
+                        <circle
+                          cx={led.x - w * 0.29}
+                          cy={led.y}
+                          r={Math.min(1.2, h * 0.24)}
+                          fill={circleFill}
+                        />
+                        <circle
+                          cx={led.x + w * 0.29}
+                          cy={led.y}
+                          r={Math.min(1.2, h * 0.24)}
+                          fill={circleFill}
+                        />
                         {showStackIndicator && (
-                          <g
-                            transform={`translate(${led.x + halfW + 3}, ${led.y - halfH - 2})`}
-                          >
+                          <g transform={`translate(${led.x + halfW + 3}, ${led.y - halfH - 2})`}>
                             <title>{stackCount} modules stacked here</title>
                             <rect
                               x={-4}
@@ -990,111 +1014,92 @@ export const ManualDesignerPage: React.FC = () => {
                     );
                   })}
                   {/* Selected LED handles on top so they work when overlapping another module */}
-                  {selectedLedId && (() => {
-                    const led = absoluteLeds.find((l) => l.id === selectedLedId);
-                    if (!led) return null;
-                    const w = led.w;
-                    const h = led.h;
-                    const halfW = w / 2;
-                    const halfH = h / 2;
-                    return (
-                      <g
-                        key="selected-handles-overlay"
-                        transform={`rotate(${led.rotation} ${led.x} ${led.y})`}
-                      >
-                        {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
-                          const hx =
-                            handle === 'nw' || handle === 'sw'
-                              ? led.x - halfW - 2
-                              : led.x + halfW - 2;
-                          const hy =
-                            handle === 'nw' || handle === 'ne'
-                              ? led.y - halfH - 2
-                              : led.y + halfH - 2;
-                          return (
-                            <rect
-                              key={handle}
-                              data-resize-handle
-                              x={hx}
-                              y={hy}
-                              width={4}
-                              height={4}
-                              fill="transparent"
-                              style={{ cursor: 'nwse-resize', pointerEvents: 'all' }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation();
-                                handleResizePointerDown(
-                                  e as unknown as React.PointerEvent<SVGElement>,
-                                  led.id,
-                                  handle
-                                );
-                              }}
-                            />
-                          );
-                        })}
-                        {(() => {
-                          const iconScale = Math.max(2, Math.min(3.5, w * 0.2));
-                          const iconY = led.y - halfH - iconScale - 3;
-                          const s = (iconScale * 2) / ROTATE_ARROW_VIEWBOX_SIZE;
-                          return (
-                            <g
-                              data-rotation-handle
-                              transform={`translate(${led.x}, ${iconY}) scale(${s}) translate(${-ROTATE_ARROW_VIEWBOX_CENTER}, ${-ROTATE_ARROW_VIEWBOX_CENTER})`}
-                              style={{ cursor: 'grab', pointerEvents: 'all' }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation();
-                                handleRotationHandlePointerDown(
-                                  e as unknown as React.PointerEvent<SVGElement>,
-                                  led.id,
-                                  led.x,
-                                  led.y
-                                );
-                              }}
-                            >
-                              <circle
-                                cx={ROTATE_ARROW_VIEWBOX_CENTER}
-                                cy={ROTATE_ARROW_VIEWBOX_CENTER}
-                                r={ROTATE_ARROW_VIEWBOX_CENTER}
+                  {selectedLedId &&
+                    (() => {
+                      const led = absoluteLeds.find((l) => l.id === selectedLedId);
+                      if (!led) return null;
+                      const w = led.w;
+                      const h = led.h;
+                      const halfW = w / 2;
+                      const halfH = h / 2;
+                      return (
+                        <g
+                          key="selected-handles-overlay"
+                          transform={`rotate(${led.rotation} ${led.x} ${led.y})`}
+                        >
+                          {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
+                            const hx =
+                              handle === 'nw' || handle === 'sw'
+                                ? led.x - halfW - 2
+                                : led.x + halfW - 2;
+                            const hy =
+                              handle === 'nw' || handle === 'ne'
+                                ? led.y - halfH - 2
+                                : led.y + halfH - 2;
+                            return (
+                              <rect
+                                key={handle}
+                                data-resize-handle
+                                x={hx}
+                                y={hy}
+                                width={4}
+                                height={4}
                                 fill="transparent"
+                                style={{ cursor: 'nwse-resize', pointerEvents: 'all' }}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  handleResizePointerDown(
+                                    e as unknown as React.PointerEvent<SVGElement>,
+                                    led.id,
+                                    handle
+                                  );
+                                }}
                               />
-                              <path
-                                d={ROTATE_ARROW_PATH}
-                                fill="#60a5fa"
-                                stroke="#e2e8f0"
-                                strokeWidth={8}
-                                strokeLinejoin="round"
-                              />
-                            </g>
-                          );
-                        })()}
-                      </g>
-                    );
-                  })()}
+                            );
+                          })}
+                          {(() => {
+                            const iconScale = Math.max(2, Math.min(3.5, w * 0.2));
+                            const iconY = led.y - halfH - iconScale - 3;
+                            const s = (iconScale * 2) / ROTATE_ARROW_VIEWBOX_SIZE;
+                            return (
+                              <g
+                                data-rotation-handle
+                                transform={`translate(${led.x}, ${iconY}) scale(${s}) translate(${-ROTATE_ARROW_VIEWBOX_CENTER}, ${-ROTATE_ARROW_VIEWBOX_CENTER})`}
+                                style={{ cursor: 'grab', pointerEvents: 'all' }}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  handleRotationHandlePointerDown(
+                                    e as unknown as React.PointerEvent<SVGElement>,
+                                    led.id,
+                                    led.x,
+                                    led.y
+                                  );
+                                }}
+                              >
+                                <circle
+                                  cx={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  cy={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  r={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  fill="transparent"
+                                />
+                                <path
+                                  d={ROTATE_ARROW_PATH}
+                                  fill="#60a5fa"
+                                  stroke="#e2e8f0"
+                                  strokeWidth={8}
+                                  strokeLinejoin="round"
+                                />
+                              </g>
+                            );
+                          })()}
+                        </g>
+                      );
+                    })()}
                 </svg>
               )}
             </div>
 
             <div className="bg-slate-900 border-l border-slate-800 p-5 space-y-5 overflow-y-auto">
-              <div className="space-y-2">
-                <div className="text-xs text-slate-400 uppercase tracking-wide">Zoom</div>
-                <div className="bg-slate-800 rounded-xl p-4 flex items-center gap-2">
-                  <button
-                    onClick={handleZoomIn}
-                    className="flex-1 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                  >
-                    Zoom In
-                  </button>
-                  <button
-                    onClick={handleFit}
-                    className="flex-1 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                  >
-                    Reset
-                  </button>
-                </div>
-                <div className="text-[11px] text-slate-400">
-                  Zoom out is clamped to the full-letter view.
-                </div>
-              </div>
               <div className="space-y-2">
                 <div className="text-xs text-slate-400 uppercase tracking-wide">Module Specs</div>
                 <div className="bg-slate-800 rounded-xl p-4 text-sm space-y-1">
@@ -1118,101 +1123,204 @@ export const ManualDesignerPage: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <div className="text-xs text-slate-400 uppercase tracking-wide">Design Controls</div>
+                <div className="text-xs text-slate-400 uppercase tracking-wide">
+                  Design Controls
+                </div>
                 <div className="bg-slate-800 rounded-xl p-4 space-y-3 text-sm">
                   <div className="flex justify-between items-center">
                     <span>LED Count</span>
                     <span className="text-white font-semibold">{draftLeds.length}</span>
                   </div>
-                  {ledStacks.some((s) => s.length > 1) && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-slate-400 uppercase tracking-wide">
-                        Stacking
-                      </div>
-                      <div className="flex gap-2 flex-wrap">
-                        <button
-                          onClick={handleBringToFront}
-                          className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                          disabled={!selectedLedId}
-                          title="Draw this module on top of overlapping ones"
-                        >
-                          To front
-                        </button>
-                        <button
-                          onClick={handleSendToBack}
-                          className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                          disabled={!selectedLedId}
-                          title="Send this module behind overlapping ones"
-                        >
-                          To back
-                        </button>
-                        <button
-                          onClick={handleSelectNextInStack}
-                          className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-amber-700/80 text-slate-200 text-xs"
-                          disabled={!selectedStack || selectedStack.length < 2}
-                          title="Select next module in this stack"
-                        >
-                          Next in stack
-                        </button>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Small grey badge appears only when modules are on top of each other. Use To front / To back and Next in stack to manage them.
-                      </div>
-                    </div>
-                  )}
-                  {selectedLedId && (
-                    <div className="space-y-2">
-                      <div className="text-[11px] text-slate-400 uppercase tracking-wide">
-                        Module size
-                      </div>
-                      <div className="flex gap-2 items-center">
-                        <label className="text-xs text-slate-400 w-10">Scale</label>
-                        <input
-                          type="number"
-                          min={0.5}
-                          max={3}
-                          step={0.1}
-                          value={
-                            draftLeds.find((l) => l.id === selectedLedId)?.scale ?? 1
-                          }
-                          onChange={(e) =>
-                            handleSetSelectedScale(Number(e.target.value) || 1)
-                          }
-                          className="flex-1 bg-slate-700 text-slate-200 rounded px-2 py-1.5 text-xs w-20"
-                        />
-                        <span className="text-[11px] text-slate-500">1 = 12×5</span>
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        Shape stays fixed; drag corners to resize. Drag the circle above the module to rotate.
-                      </div>
-                      <button
-                        onClick={handleDuplicateSelected}
-                        className="w-full px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                        title="Duplicate this module with same rotation and size"
-                      >
-                        Duplicate module
-                      </button>
-                    </div>
-                  )}
                   <button
-                    onClick={handleAddAtCenter}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          'Remove all LED modules from this character? This cannot be undone.'
+                        )
+                      ) {
+                        handleClearAll();
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
                   >
-                    Add LED
+                    Clear all modules
                   </button>
-                  <button
-                    onClick={handleClearAll}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-700 text-slate-200 text-xs"
-                  >
-                    Clear All
-                  </button>
-                  {/* Snap to Grid UI hidden for now; snapEnabled/gridSize/snapPoint logic kept in code */}
                 </div>
               </div>
-
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Figma-style bottom center toolbar */}
+      <div
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-2 rounded-2xl bg-slate-800/95 border border-slate-700/80 shadow-xl"
+        role="toolbar"
+      >
+        {/* Tools: Pan, Add (place) — select is default, no button */}
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            title="Pan canvas"
+            onClick={() => setTool('pan')}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'pan' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'}`}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 11v6a2 2 0 01-2 2H8a2 2 0 01-2-2v-6" />
+              <path d="M14 5v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h8a2 2 0 012 2z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Add mode — click on canvas to place a module"
+            onClick={() => setTool('add')}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'add' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'}`}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="16" />
+              <line x1="8" y1="12" x2="16" y2="12" />
+            </svg>
+          </button>
+        </div>
+        <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
+        {/* Global actions: Add LED at center, Zoom, Reset */}
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            title="Add LED at center"
+            onClick={handleAddAtCenter}
+            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Zoom in"
+            onClick={handleZoomIn}
+            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              <line x1="11" y1="8" x2="11" y2="14" />
+              <line x1="8" y1="11" x2="14" y2="11" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Reset view"
+            onClick={handleFit}
+            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+          </button>
+        </div>
+        {/* Selection-only: Delete and Duplicate — shown only when one module is selected */}
+        {selectedLedId && (
+          <>
+            <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="Delete selected module"
+                onClick={handleDeleteSelected}
+                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-slate-400 hover:bg-red-900/50 hover:text-red-300 transition-colors min-w-[3rem]"
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                  <line x1="10" y1="11" x2="10" y2="17" />
+                  <line x1="14" y1="11" x2="14" y2="17" />
+                </svg>
+                <span className="text-[10px] uppercase tracking-wide">Delete</span>
+              </button>
+              <button
+                type="button"
+                title="Duplicate selected module"
+                onClick={handleDuplicateSelected}
+                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors min-w-[3rem]"
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+                <span className="text-[10px] uppercase tracking-wide">Duplicate</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

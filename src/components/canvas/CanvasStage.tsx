@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react';
 import {
   useProjectStore,
   type BlockCharPaths,
@@ -124,8 +124,9 @@ export const CanvasStage: React.FC = () => {
     };
   }, []);
 
-  // Handle character selection
+  // Handle character selection (position passed by CharacterGroup but not used here)
   const handleCharSelect = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     (charId: string, _position: { x: number; y: number }) => {
       selectChar(charId);
     },
@@ -325,32 +326,39 @@ export const CanvasStage: React.FC = () => {
     return charLeds.flatMap((c) => c.leds);
   }, [charLeds]);
 
-  const qaResults = useMemo(() => {
-    if (!showQA) return [];
+  type QAResultItem = {
+    charId: string;
+    char: string;
+    quality: ReturnType<typeof evaluatePlacementQuality>;
+    grade: ReturnType<typeof gradePlacement>;
+  };
+  const [qaResults, setQaResults] = useState<QAResultItem[]>([]);
 
+  useLayoutEffect(() => {
+    if (!showQA) {
+      queueMicrotask(() => setQaResults([]));
+      return;
+    }
     const charLabelMap = new Map<string, string>();
     blockCharPaths.forEach(({ blockId, charPaths }) => {
       charPaths.forEach((cp) => {
         charLabelMap.set(`${blockId}-${cp.charIndex}`, cp.char || '');
       });
     });
-
-    return charLeds
-      .map((charData) => {
-        const path = pathRefs.current.get(charData.charId);
-        if (!path || charData.leds.length === 0) return null;
-
-        const quality = evaluatePlacementQuality(path, charData.leds);
-        const grade = gradePlacement(quality, DEFAULT_QUALITY_THRESHOLDS);
-
-        return {
-          charId: charData.charId,
-          char: charLabelMap.get(charData.charId) || '',
-          quality,
-          grade,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const results: QAResultItem[] = [];
+    charLeds.forEach((charData) => {
+      const path = pathRefs.current.get(charData.charId);
+      if (!path || charData.leds.length === 0) return;
+      const quality = evaluatePlacementQuality(path, charData.leds);
+      const grade = gradePlacement(quality, DEFAULT_QUALITY_THRESHOLDS);
+      results.push({
+        charId: charData.charId,
+        char: charLabelMap.get(charData.charId) || '',
+        quality,
+        grade,
+      });
+    });
+    queueMicrotask(() => setQaResults(results));
   }, [showQA, charLeds, blockCharPaths]);
 
   // Calculate dynamic viewBox based on content bounds
