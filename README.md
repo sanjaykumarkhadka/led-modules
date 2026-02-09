@@ -1,4 +1,5 @@
 # LED Channel Letter Configurator
+//using html, css and javascript
 
 A comprehensive web-based tool for designing and calculating LED channel letters for signage applications. This application allows users to create custom LED channel letters, visualize LED placement, and calculate all necessary specifications for manufacturing and installation.
 
