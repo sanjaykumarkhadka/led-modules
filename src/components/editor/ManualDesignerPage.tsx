@@ -80,6 +80,10 @@ export const ManualDesignerPage: React.FC = () => {
   const [invalidLedIds, setInvalidLedIds] = useState<Set<string>>(new Set());
   const [groupSpacing, setGroupSpacing] = useState(1);
   const [groupScale, setGroupScale] = useState(1);
+  const [groupAngle, setGroupAngle] = useState(0);
+  const [groupLayoutMode, setGroupLayoutMode] = useState<'line' | 'grid' | null>(null);
+  const selectedLedIdsRef = useRef<Set<string>>(new Set());
+  selectedLedIdsRef.current = selectedLedIds;
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -309,7 +313,6 @@ export const ManualDesignerPage: React.FC = () => {
 
   /** Group LEDs that are literally on top of each other (same spot, indistinguishable). */
   const ledStacks = useMemo(() => {
-    const stackThreshold = 2.5;
     const groups: string[][] = [];
     const used = new Set<string>();
     for (let i = 0; i < absoluteLeds.length; i++) {
@@ -322,6 +325,9 @@ export const ManualDesignerPage: React.FC = () => {
         if (used.has(b.id)) continue;
         const dx = a.x - b.x;
         const dy = a.y - b.y;
+        const size = Math.min(a.w, a.h, b.w, b.h);
+        // Treat as a true stack only when centers are almost identical.
+        const stackThreshold = size * 0.3;
         if (Math.hypot(dx, dy) < stackThreshold) {
           stack.push(b.id);
           used.add(b.id);
@@ -394,6 +400,17 @@ export const ManualDesignerPage: React.FC = () => {
       if (!localBounds) return { u: 0, v: 0 };
       const u = clamp01((point.x - localBounds.x) / localBounds.width);
       const v = clamp01((point.y - localBounds.y) / localBounds.height);
+      return { u, v };
+    },
+    [localBounds]
+  );
+
+  /** Same as toManual but no clamping — for group ops so positions can go outside [0,1]. */
+  const toManualUnclamped = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!localBounds) return { u: 0, v: 0 };
+      const u = (point.x - localBounds.x) / localBounds.width;
+      const v = (point.y - localBounds.y) / localBounds.height;
       return { u, v };
     },
     [localBounds]
@@ -473,27 +490,30 @@ export const ManualDesignerPage: React.FC = () => {
         x: point.x - drag.offsetX,
         y: point.y - drag.offsetY,
       });
-      const leadNormalized = toManual(target);
+      const isGroupDrag = drag.allIds.length >= 2;
+      const leadNorm = isGroupDrag ? toManualUnclamped(target) : toManual(target);
       const startLead = drag.startPositions.get(drag.leadId);
       if (!startLead) return;
-      const deltaU = leadNormalized.u - startLead.u;
-      const deltaV = leadNormalized.v - startLead.v;
+      const deltaU = leadNorm.u - startLead.u;
+      const deltaV = leadNorm.v - startLead.v;
 
       setDraftLeds((prev) =>
         prev.map((led) => {
           if (!drag.allIds.includes(led.id)) return led;
           const start = drag.startPositions.get(led.id);
           if (!start) return led;
+          const nu = start.u + deltaU;
+          const nv = start.v + deltaV;
           return {
             ...led,
-            u: clamp01(start.u + deltaU),
-            v: clamp01(start.v + deltaV),
+            u: isGroupDrag ? nu : clamp01(nu),
+            v: isGroupDrag ? nv : clamp01(nv),
           };
         })
       );
       setIsDirty(true);
     },
-    [getSvgPoint, localBounds, snapPoint, toManual]
+    [getSvgPoint, localBounds, snapPoint, toManual, toManualUnclamped]
   );
 
   const handleLedPointerUp = useCallback((event: React.PointerEvent<SVGGElement>) => {
@@ -541,7 +561,7 @@ export const ManualDesignerPage: React.FC = () => {
       const dy = point.y - resize.startY;
       const localDx = dx * cos + dy * sin;
       const localDy = -dx * sin + dy * cos;
-      const minScale = 0.5;
+      const minScale = 0.15;
       let scaleDelta = 0;
       switch (resize.handle) {
         case 'se':
@@ -664,10 +684,7 @@ export const ManualDesignerPage: React.FC = () => {
           prev.map((l) => (l.id === rot.ledId ? { ...l, rotation: newRotation } : l))
         );
       } else {
-        const currentAngleRad = Math.atan2(
-          point.y - rot.centerY,
-          point.x - rot.centerX
-        );
+        const currentAngleRad = Math.atan2(point.y - rot.centerY, point.x - rot.centerX);
         const currentAngleDeg = (currentAngleRad * 180) / Math.PI;
         const deltaDeg = currentAngleDeg - rot.startAngleDeg;
         const cos = Math.cos((deltaDeg * Math.PI) / 180);
@@ -682,7 +699,7 @@ export const ManualDesignerPage: React.FC = () => {
             const dy = start.y - rot.centerY;
             const newX = rot.centerX + dx * cos - dy * sin;
             const newY = rot.centerY + dx * sin + dy * cos;
-            const { u, v } = toManual({ x: newX, y: newY });
+            const { u, v } = toManualUnclamped({ x: newX, y: newY });
             let newRotation = startRot + deltaDeg;
             newRotation = ((newRotation % 360) + 360) % 360;
             return { ...led, u, v, rotation: newRotation };
@@ -691,7 +708,7 @@ export const ManualDesignerPage: React.FC = () => {
       }
       setIsDirty(true);
     },
-    [absoluteLeds, getSvgPoint, toManual]
+    [absoluteLeds, getSvgPoint, toManual, toManualUnclamped]
   );
 
   const handleRotationHandlePointerUp = useCallback((event: React.PointerEvent<SVGElement>) => {
@@ -714,9 +731,9 @@ export const ManualDesignerPage: React.FC = () => {
           addLedAtPoint(point, 0, true);
           return;
         }
-        clearSelection();
         if (!viewBox) return;
         if (tool === 'boxSelect') {
+          // Don't clear selection until marquee finishes — keeps group visible while drawing box
           marqueeRef.current = {
             pointerId: event.pointerId,
             startX: point.x,
@@ -729,14 +746,17 @@ export const ManualDesignerPage: React.FC = () => {
             endY: point.y,
           });
           event.currentTarget.setPointerCapture(event.pointerId);
-        } else if (event.shiftKey || tool === 'pan') {
-          panRef.current = {
-            pointerId: event.pointerId,
-            start: point,
-            viewBox,
-          };
-          setIsPanning(true);
-          event.currentTarget.setPointerCapture(event.pointerId);
+        } else {
+          clearSelection();
+          if (event.shiftKey || tool === 'pan') {
+            panRef.current = {
+              pointerId: event.pointerId,
+              start: point,
+              viewBox,
+            };
+            setIsPanning(true);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }
         }
       }
     },
@@ -749,9 +769,7 @@ export const ManualDesignerPage: React.FC = () => {
       if (mq && event.pointerId === mq.pointerId) {
         const point = getSvgPoint(event);
         if (point)
-          setMarqueeRect((prev) =>
-            prev ? { ...prev, endX: point.x, endY: point.y } : null
-          );
+          setMarqueeRect((prev) => (prev ? { ...prev, endX: point.x, endY: point.y } : null));
         return;
       }
       if (resizeRef.current && event.pointerId === resizeRef.current.pointerId) {
@@ -814,12 +832,7 @@ export const ManualDesignerPage: React.FC = () => {
               const ledRight = led.x + halfW;
               const ledTop = led.y - halfH;
               const ledBottom = led.y + halfH;
-              return !(
-                ledRight < left ||
-                ledLeft > right ||
-                ledBottom < top ||
-                ledTop > bottom
-              );
+              return !(ledRight < left || ledLeft > right || ledBottom < top || ledTop > bottom);
             })
             .map((led) => led.id);
           setSelectedLedIds(new Set(ids));
@@ -886,6 +899,7 @@ export const ManualDesignerPage: React.FC = () => {
     const selected = draftLeds.filter((led) => selectedLedIds.has(led.id));
     if (selected.length === 0) return;
     const offset = 6;
+    const isGroup = selected.length >= 2;
     setDraftLeds((prev) => {
       const next = [...prev];
       const newLeds: ManualLED[] = [];
@@ -894,8 +908,8 @@ export const ManualDesignerPage: React.FC = () => {
         const nv = led.v + offset / localBounds.height;
         newLeds.push({
           id: createLedId(),
-          u: clamp01(nu),
-          v: clamp01(nv),
+          u: isGroup ? nu : clamp01(nu),
+          v: isGroup ? nv : clamp01(nv),
           rotation: led.rotation,
           ...(led.scale != null && led.scale !== 1 && { scale: led.scale }),
         });
@@ -948,89 +962,342 @@ export const ManualDesignerPage: React.FC = () => {
     };
   }, [selectedAbsoluteLeds]);
 
-  /** Sync group scale from selection only when selection changes (not when draftLeds changes from slider) */
+  type GroupAxis = 'horizontal' | 'vertical';
+
+  const inferredGroupAxis = useMemo<GroupAxis | null>(() => {
+    if (!alignBounds || selectedAbsoluteLeds.length < 2) return null;
+    const width = alignBounds.right - alignBounds.left;
+    const height = alignBounds.bottom - alignBounds.top;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+    return width >= height ? 'horizontal' : 'vertical';
+  }, [alignBounds, selectedAbsoluteLeds]);
+
+  const orderedSelectedAbsoluteLeds = useMemo(() => {
+    if (!inferredGroupAxis) return [];
+    const sorted = [...selectedAbsoluteLeds];
+    if (inferredGroupAxis === 'horizontal') {
+      sorted.sort((a, b) => a.x - b.x);
+    } else {
+      sorted.sort((a, b) => a.y - b.y);
+    }
+    return sorted;
+  }, [selectedAbsoluteLeds, inferredGroupAxis]);
+
+  const averageSelectedSize = useMemo(() => {
+    if (selectedAbsoluteLeds.length === 0) return 0;
+    const total = selectedAbsoluteLeds.reduce((sum, led) => sum + Math.min(led.w, led.h), 0);
+    return total / selectedAbsoluteLeds.length;
+  }, [selectedAbsoluteLeds]);
+
+  const groupExtendHandles = useMemo(
+    () => {
+      if (
+        !localBounds ||
+        !alignBounds ||
+        !inferredGroupAxis ||
+        orderedSelectedAbsoluteLeds.length < 2
+      ) {
+        return [] as { x: number; y: number; direction: 'start' | 'end' }[];
+      }
+
+      const first = orderedSelectedAbsoluteLeds[0];
+      const last = orderedSelectedAbsoluteLeds[orderedSelectedAbsoluteLeds.length - 1];
+
+      const avgW =
+        orderedSelectedAbsoluteLeds.reduce((sum, led) => sum + led.w, 0) /
+        orderedSelectedAbsoluteLeds.length;
+      const avgH =
+        orderedSelectedAbsoluteLeds.reduce((sum, led) => sum + led.h, 0) /
+        orderedSelectedAbsoluteLeds.length;
+
+      const baseSpacing = groupSpacing > 0 ? groupSpacing : inferredGroupAxis === 'horizontal'
+          ? avgW * 0.6
+          : avgH * 0.6;
+
+      if (!Number.isFinite(baseSpacing)) {
+        return [];
+      }
+
+      const handles: { x: number; y: number; direction: 'start' | 'end' }[] = [];
+
+      if (inferredGroupAxis === 'horizontal') {
+        const gap = baseSpacing + avgW;
+        const startX = first.x - gap;
+        const endX = last.x + gap;
+        const centerY = alignBounds.centerY;
+        handles.push({ x: startX, y: centerY, direction: 'start' });
+        handles.push({ x: endX, y: centerY, direction: 'end' });
+      } else {
+        const gap = baseSpacing + avgH;
+        const startY = first.y - gap;
+        const endY = last.y + gap;
+        const centerX = alignBounds.centerX;
+        handles.push({ x: centerX, y: startY, direction: 'start' });
+        handles.push({ x: centerX, y: endY, direction: 'end' });
+      }
+
+      return handles;
+    },
+    [alignBounds, inferredGroupAxis, orderedSelectedAbsoluteLeds, localBounds, groupSpacing]
+  );
+
+  /** Sync group scale and angle from selection when selection changes */
   useLayoutEffect(() => {
     if (selectedLedIds.size < 2) return;
     const selected = draftLeds.filter((l) => selectedLedIds.has(l.id));
     if (selected.length === 0) return;
-    const avg =
-      selected.reduce((sum, l) => sum + (l.scale ?? 1), 0) / selected.length;
-    setGroupScale(avg);
+    const avgScale = selected.reduce((sum, l) => sum + (l.scale ?? 1), 0) / selected.length;
+    setGroupScale(avgScale);
+    const avgRotation = selected.reduce((sum, l) => sum + l.rotation, 0) / selected.length;
+    setGroupAngle(((avgRotation % 360) + 360) % 360);
   }, [selectedLedIds]);
 
   const GROUP_SPACING_MIN = 0;
   const GROUP_SPACING_MAX = 20;
-  const GROUP_SCALE_MIN = 0.5;
+  const GROUP_SCALE_MIN = 0.15;
   const GROUP_SCALE_MAX = 3;
+  const GROUP_ANGLE_MIN = 0;
+  const GROUP_ANGLE_MAX = 360;
+
+  /** Apply spacing to current selection. Layout inferred from bounds if not provided. */
+  const applyGroupSpacing = useCallback(
+    (spacing: number, layout?: 'horizontal' | 'vertical') => {
+      if (!localBounds || !alignBounds || selectedAbsoluteLeds.length < 2) return;
+      const horizontal =
+        layout ??
+        (alignBounds.right - alignBounds.left >= alignBounds.bottom - alignBounds.top
+          ? 'horizontal'
+          : 'vertical');
+
+      if (horizontal === 'horizontal') {
+        const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.x - b.x);
+        const totalWidth =
+          sorted.reduce((sum, led) => sum + led.w, 0) + (sorted.length - 1) * spacing;
+        let x = alignBounds.centerX - totalWidth / 2;
+        const y = alignBounds.centerY;
+        const updates = new Map<string, { u: number; v: number }>();
+        for (const led of sorted) {
+          x += led.w / 2;
+          updates.set(led.id, {
+            u: (x - localBounds.x) / localBounds.width,
+            v: (y - localBounds.y) / localBounds.height,
+          });
+          x += led.w / 2 + spacing;
+        }
+        setDraftLeds((prev) =>
+          prev.map((led) => {
+            const uv = updates.get(led.id);
+            if (uv == null) return led;
+            return { ...led, ...uv };
+          })
+        );
+      } else {
+        const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.y - b.y);
+        const totalHeight =
+          sorted.reduce((sum, led) => sum + led.h, 0) + (sorted.length - 1) * spacing;
+        let y = alignBounds.centerY - totalHeight / 2;
+        const x = alignBounds.centerX;
+        const updates = new Map<string, { u: number; v: number }>();
+        for (const led of sorted) {
+          y += led.h / 2;
+          updates.set(led.id, {
+            u: (x - localBounds.x) / localBounds.width,
+            v: (y - localBounds.y) / localBounds.height,
+          });
+          y += led.h / 2 + spacing;
+        }
+        setDraftLeds((prev) =>
+          prev.map((led) => {
+            const uv = updates.get(led.id);
+            if (uv == null) return led;
+            return { ...led, ...uv };
+          })
+        );
+      }
+      setIsDirty(true);
+      setGroupLayoutMode('line');
+    },
+    [alignBounds, localBounds, selectedAbsoluteLeds]
+  );
 
   /** Align horizontal = arrange in a horizontal line (same Y, spaced X). */
   const handleAlignCenterH = useCallback(() => {
-    if (!localBounds || !alignBounds || selectedAbsoluteLeds.length < 2) return;
-    const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.x - b.x);
-    const totalWidth =
-      sorted.reduce((sum, led) => sum + led.w, 0) +
-      (sorted.length - 1) * groupSpacing;
-    let x = alignBounds.centerX - totalWidth / 2;
-    const y = alignBounds.centerY;
-    const updates = new Map<string, { u: number; v: number }>();
-    for (const led of sorted) {
-      x += led.w / 2;
-      updates.set(led.id, {
-        u: clamp01((x - localBounds.x) / localBounds.width),
-        v: clamp01((y - localBounds.y) / localBounds.height),
-      });
-      x += led.w / 2 + groupSpacing;
-    }
-    setDraftLeds((prev) =>
-      prev.map((led) => {
-        const uv = updates.get(led.id);
-        if (uv == null) return led;
-        return { ...led, ...uv };
-      })
-    );
-    setIsDirty(true);
-  }, [alignBounds, groupSpacing, localBounds, selectedAbsoluteLeds]);
+    applyGroupSpacing(groupSpacing, 'horizontal');
+  }, [applyGroupSpacing, groupSpacing]);
 
   /** Align vertical = arrange in a vertical line (same X, spaced Y). */
   const handleAlignMiddleV = useCallback(() => {
-    if (!localBounds || !alignBounds || selectedAbsoluteLeds.length < 2) return;
-    const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.y - b.y);
-    const totalHeight =
-      sorted.reduce((sum, led) => sum + led.h, 0) +
-      (sorted.length - 1) * groupSpacing;
-    let y = alignBounds.centerY - totalHeight / 2;
-    const x = alignBounds.centerX;
-    const updates = new Map<string, { u: number; v: number }>();
-    for (const led of sorted) {
-      y += led.h / 2;
-      updates.set(led.id, {
-        u: clamp01((x - localBounds.x) / localBounds.width),
-        v: clamp01((y - localBounds.y) / localBounds.height),
-      });
-      y += led.h / 2 + groupSpacing;
-    }
+    applyGroupSpacing(groupSpacing, 'vertical');
+  }, [applyGroupSpacing, groupSpacing]);
+
+  const handleGroupScaleChange = useCallback((value: number) => {
+    const clamped = Math.max(GROUP_SCALE_MIN, Math.min(GROUP_SCALE_MAX, Number(value)));
+    if (!Number.isFinite(clamped)) return;
+    setGroupScale(clamped);
+    const ids = selectedLedIdsRef.current;
+    // Only update local draftLeds — never touch the store during edit (fixes group disappearing)
+    setDraftLeds((prev) => prev.map((led) => (ids.has(led.id) ? { ...led, scale: clamped } : led)));
+    setIsDirty(true);
+  }, []);
+
+  const handleGroupAngleChange = useCallback((value: number) => {
+    const deg = Number(value);
+    if (!Number.isFinite(deg)) return;
+    const angle = ((deg % 360) + 360) % 360;
+    setGroupAngle(angle);
+    const ids = selectedLedIdsRef.current;
     setDraftLeds((prev) =>
-      prev.map((led) => {
-        const uv = updates.get(led.id);
-        if (uv == null) return led;
-        return { ...led, ...uv };
-      })
+      prev.map((led) => (ids.has(led.id) ? { ...led, rotation: angle } : led))
     );
     setIsDirty(true);
-  }, [alignBounds, groupSpacing, localBounds, selectedAbsoluteLeds]);
+  }, []);
 
-  const handleGroupScaleChange = useCallback(
-    (value: number) => {
-      setGroupScale(value);
-      const ids = new Set(selectedLedIds);
+  const arrangeGrid = useCallback(
+    (spacingOverride?: number) => {
+      if (!localBounds || selectedAbsoluteLeds.length < 2) return;
+
+      const count = selectedAbsoluteLeds.length;
+      const cols = Math.ceil(Math.sqrt(count));
+      const rows = Math.ceil(count / cols);
+
+      const avgW =
+        selectedAbsoluteLeds.reduce((sum, led) => sum + led.w, 0) / count || BASE_LED_WIDTH;
+      const avgH =
+        selectedAbsoluteLeds.reduce((sum, led) => sum + led.h, 0) / count || BASE_LED_HEIGHT;
+
+      const spacing =
+        spacingOverride != null
+          ? spacingOverride
+          : groupSpacing > 0
+            ? groupSpacing
+            : Math.min(avgW, avgH) * 0.5;
+
+      const gridWidth = cols * avgW + (cols - 1) * spacing;
+      const gridHeight = rows * avgH + (rows - 1) * spacing;
+
+      const centerX = alignBounds ? alignBounds.centerX : localBounds.x + localBounds.width / 2;
+      const centerY = alignBounds ? alignBounds.centerY : localBounds.y + localBounds.height / 2;
+
+      const originX = centerX - gridWidth / 2 + avgW / 2;
+      const originY = centerY - gridHeight / 2 + avgH / 2;
+
+      const ordered = [...selectedAbsoluteLeds].sort((a, b) =>
+        a.y === b.y ? a.x - b.x : a.y - b.y
+      );
+
+      const updates = new Map<string, { u: number; v: number }>();
+
+      ordered.forEach((led, index) => {
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+        const x = originX + col * (avgW + spacing);
+        const y = originY + row * (avgH + spacing);
+
+        updates.set(led.id, {
+          u: (x - localBounds.x) / localBounds.width,
+          v: (y - localBounds.y) / localBounds.height,
+        });
+      });
+
       setDraftLeds((prev) =>
-        prev.map((led) =>
-          ids.has(led.id) ? { ...led, scale: value } : led
-        )
+        prev.map((led) => {
+          const uv = updates.get(led.id);
+          if (!uv) return led;
+          return { ...led, ...uv };
+        })
       );
       setIsDirty(true);
     },
-    [selectedLedIds]
+    [alignBounds, groupSpacing, localBounds, selectedAbsoluteLeds]
+  );
+
+  const handleArrangeGrid = useCallback(() => {
+    arrangeGrid();
+    setGroupLayoutMode('grid');
+  }, [arrangeGrid]);
+
+  const handleExtendGroup = useCallback(
+    (direction: 'start' | 'end') => {
+      if (!localBounds || selectedLedIds.size === 0) return;
+
+      const axis: GroupAxis = inferredGroupAxis ?? 'horizontal';
+      const selectedIds = Array.from(selectedLedIds);
+
+      const dirSign = direction === 'end' ? 1 : -1;
+
+      const newIds: string[] = [];
+
+      setDraftLeds((prev) => {
+        const idToLed = new Map<string, ManualLED>();
+        for (const led of prev) {
+          idToLed.set(led.id, led);
+        }
+
+        const existing: { led: ManualLED; abs: (typeof absoluteLeds)[number] | null }[] = [];
+        for (const id of selectedIds) {
+          const led = idToLed.get(id);
+          if (!led) continue;
+          const abs = absoluteLeds.find((a) => a.id === id) ?? null;
+          existing.push({ led, abs });
+        }
+
+        if (existing.length === 0) return prev;
+
+        let sumW = 0;
+        let sumH = 0;
+        let countWithSize = 0;
+        for (const { abs } of existing) {
+          if (!abs) continue;
+          sumW += abs.w;
+          sumH += abs.h;
+          countWithSize += 1;
+        }
+        const avgW = countWithSize > 0 ? sumW / countWithSize : BASE_LED_WIDTH;
+        const avgH = countWithSize > 0 ? sumH / countWithSize : BASE_LED_HEIGHT;
+
+        const baseSpacing =
+          groupSpacing > 0
+            ? groupSpacing
+            : axis === 'horizontal'
+              ? avgH * 0.6
+              : avgW * 0.6;
+
+        let du = 0;
+        let dv = 0;
+        if (axis === 'horizontal') {
+          // Add a new row vertically (layer)
+          const deltaY = (avgH + baseSpacing) * dirSign;
+          dv = deltaY / localBounds.height;
+        } else {
+          // Add a new column horizontally (layer)
+          const deltaX = (avgW + baseSpacing) * dirSign;
+          du = deltaX / localBounds.width;
+        }
+
+        const next = [...prev];
+        for (const { led } of existing) {
+          const id = createLedId();
+          newIds.push(id);
+          next.push({
+            ...led,
+            id,
+            u: led.u + du,
+            v: led.v + dv,
+          });
+        }
+        return next;
+      });
+
+      if (newIds.length > 0) {
+        setSelectedLedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of newIds) next.add(id);
+          return next;
+        });
+        setIsDirty(true);
+      }
+    },
+    [absoluteLeds, inferredGroupAxis, localBounds, selectedLedIds, groupSpacing]
   );
 
   const handleSave = useCallback(() => {
@@ -1219,19 +1486,24 @@ export const ManualDesignerPage: React.FC = () => {
                           fill="transparent"
                           style={{ pointerEvents: 'all' }}
                         />
-                        {selected && (
-                          <rect
-                            x={led.x - halfW - 0.8}
-                            y={led.y - halfH - 0.8}
-                            width={w + 1.6}
-                            height={h + 1.6}
-                            rx={halfH + 0.8}
-                            ry={halfH + 0.8}
-                            fill="none"
-                            stroke="#60a5fa"
-                            strokeWidth={1}
-                          />
-                        )}
+                        {selected &&
+                          (() => {
+                            const pad = Math.min(0.8, Math.max(0.15, h * 0.15));
+                            const strokeW = Math.min(0.9, Math.max(0.25, h * 0.18));
+                            return (
+                              <rect
+                                x={led.x - halfW - pad}
+                                y={led.y - halfH - pad}
+                                width={w + pad * 2}
+                                height={h + pad * 2}
+                                rx={halfH + pad}
+                                ry={halfH + pad}
+                                fill="none"
+                                stroke="#60a5fa"
+                                strokeWidth={strokeW}
+                              />
+                            );
+                          })()}
                         {/* Resize handles — always present so you can resize without selecting first */}
                         {showPerLedHandles &&
                           (['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
@@ -1265,42 +1537,43 @@ export const ManualDesignerPage: React.FC = () => {
                               />
                             );
                           })}
-                        {showPerLedHandles && (() => {
-                          const iconScale = Math.max(2, Math.min(3.5, w * 0.2));
-                          const iconY = led.y - halfH - iconScale - 3;
-                          const s = (iconScale * 2) / ROTATE_ARROW_VIEWBOX_SIZE;
-                          return (
-                            <g
-                              data-rotation-handle
-                              transform={`translate(${led.x}, ${iconY}) scale(${s}) translate(${-ROTATE_ARROW_VIEWBOX_CENTER}, ${-ROTATE_ARROW_VIEWBOX_CENTER})`}
-                              style={{ cursor: 'grab', pointerEvents: 'all' }}
-                              onPointerDown={(e) => {
-                                e.stopPropagation();
-                                selectOnly(led.id);
-                                handleRotationHandlePointerDown(
-                                  e as unknown as React.PointerEvent<SVGElement>,
-                                  led.id,
-                                  led.x,
-                                  led.y
-                                );
-                              }}
-                            >
-                              <circle
-                                cx={ROTATE_ARROW_VIEWBOX_CENTER}
-                                cy={ROTATE_ARROW_VIEWBOX_CENTER}
-                                r={ROTATE_ARROW_VIEWBOX_CENTER}
-                                fill="transparent"
-                              />
-                              <path
-                                d={ROTATE_ARROW_PATH}
-                                fill="#60a5fa"
-                                stroke="#e2e8f0"
-                                strokeWidth={8}
-                                strokeLinejoin="round"
-                              />
-                            </g>
-                          );
-                        })()}
+                        {showPerLedHandles &&
+                          (() => {
+                            const iconScale = Math.max(2, Math.min(3.5, w * 0.2));
+                            const iconY = led.y - halfH - iconScale - 3;
+                            const s = (iconScale * 2) / ROTATE_ARROW_VIEWBOX_SIZE;
+                            return (
+                              <g
+                                data-rotation-handle
+                                transform={`translate(${led.x}, ${iconY}) scale(${s}) translate(${-ROTATE_ARROW_VIEWBOX_CENTER}, ${-ROTATE_ARROW_VIEWBOX_CENTER})`}
+                                style={{ cursor: 'grab', pointerEvents: 'all' }}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  selectOnly(led.id);
+                                  handleRotationHandlePointerDown(
+                                    e as unknown as React.PointerEvent<SVGElement>,
+                                    led.id,
+                                    led.x,
+                                    led.y
+                                  );
+                                }}
+                              >
+                                <circle
+                                  cx={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  cy={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  r={ROTATE_ARROW_VIEWBOX_CENTER}
+                                  fill="transparent"
+                                />
+                                <path
+                                  d={ROTATE_ARROW_PATH}
+                                  fill="#60a5fa"
+                                  stroke="#e2e8f0"
+                                  strokeWidth={8}
+                                  strokeLinejoin="round"
+                                />
+                              </g>
+                            );
+                          })()}
                         <rect
                           x={led.x - halfW}
                           y={led.y - halfH}
@@ -1312,18 +1585,15 @@ export const ManualDesignerPage: React.FC = () => {
                           stroke={strokeColor}
                           strokeWidth={isInvalid ? 1.2 : 0.9}
                         />
-                        <circle
-                          cx={led.x - w * 0.29}
-                          cy={led.y}
-                          r={Math.min(1.2, h * 0.24)}
-                          fill={circleFill}
-                        />
-                        <circle
-                          cx={led.x + w * 0.29}
-                          cy={led.y}
-                          r={Math.min(1.2, h * 0.24)}
-                          fill={circleFill}
-                        />
+                        {(() => {
+                          const r = Math.min(1.0, h * 0.18);
+                          return (
+                            <>
+                              <circle cx={led.x - w * 0.29} cy={led.y} r={r} fill={circleFill} />
+                              <circle cx={led.x + w * 0.29} cy={led.y} r={r} fill={circleFill} />
+                            </>
+                          );
+                        })()}
                         {showStackIndicator && (
                           <g transform={`translate(${led.x + halfW + 3}, ${led.y - halfH - 2})`}>
                             <title>{stackCount} modules stacked here</title>
@@ -1386,6 +1656,53 @@ export const ManualDesignerPage: React.FC = () => {
                         </g>
                       );
                     })()}
+
+                  {/* Group extend plus buttons at selection ends */}
+                  {selectedLedIds.size >= 2 &&
+                    groupExtendHandles.map((handle) => {
+                      const r =
+                        averageSelectedSize > 0
+                          ? Math.max(2.2, Math.min(3.2, averageSelectedSize * 0.2))
+                          : 2.6;
+                      return (
+                        <g
+                          key={`extend-${handle.direction}`}
+                          transform={`translate(${handle.x}, ${handle.y})`}
+                          style={{ cursor: 'pointer', pointerEvents: 'all' }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            handleExtendGroup(handle.direction);
+                          }}
+                        >
+                          <circle
+                            cx={0}
+                            cy={0}
+                            r={r}
+                            fill="#0f172a"
+                            stroke="#38bdf8"
+                            strokeWidth={0.7}
+                          />
+                          <line
+                            x1={-r * 0.4}
+                            y1={0}
+                            x2={r * 0.4}
+                            y2={0}
+                            stroke="#e5f3ff"
+                            strokeWidth={0.7}
+                            strokeLinecap="round"
+                          />
+                          <line
+                            x1={0}
+                            y1={-r * 0.4}
+                            x2={0}
+                            y2={r * 0.4}
+                            stroke="#e5f3ff"
+                            strokeWidth={0.7}
+                            strokeLinecap="round"
+                          />
+                        </g>
+                      );
+                    })}
                   {/* Selected LED handles on top so they work when overlapping another module (single only) */}
                   {primarySelectedId &&
                     (() => {
@@ -1497,9 +1814,7 @@ export const ManualDesignerPage: React.FC = () => {
 
               {selectedLedIds.size >= 2 && (
                 <div className="space-y-2">
-                  <div className="text-xs text-slate-400 uppercase tracking-wide">
-                    Group
-                  </div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wide">Group</div>
                   <div className="bg-slate-800 rounded-xl p-4 space-y-4 text-sm">
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
@@ -1512,11 +1827,36 @@ export const ManualDesignerPage: React.FC = () => {
                         type="range"
                         min={GROUP_SPACING_MIN}
                         max={GROUP_SPACING_MAX}
-                        step={0.5}
+                        step={0.1}
                         value={groupSpacing}
-                        onChange={(e) =>
-                          setGroupSpacing(parseFloat(e.target.value))
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.currentTarget.value);
+                          if (Number.isFinite(v)) {
+                            setGroupSpacing(v);
+                            if (selectedAbsoluteLeds.length >= 2) {
+                              if (groupLayoutMode === 'grid') {
+                                arrangeGrid(v);
+                                setGroupLayoutMode('grid');
+                              } else {
+                                applyGroupSpacing(v);
+                              }
+                            }
+                          }
+                        }}
+                        onInput={(e) => {
+                          const v = parseFloat((e.target as HTMLInputElement).value);
+                          if (Number.isFinite(v)) {
+                            setGroupSpacing(v);
+                            if (selectedAbsoluteLeds.length >= 2) {
+                              if (groupLayoutMode === 'grid') {
+                                arrangeGrid(v);
+                                setGroupLayoutMode('grid');
+                              } else {
+                                applyGroupSpacing(v);
+                              }
+                            }
+                          }
+                        }}
                         className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
                       />
                     </div>
@@ -1533,9 +1873,31 @@ export const ManualDesignerPage: React.FC = () => {
                         max={GROUP_SCALE_MAX}
                         step={0.05}
                         value={groupScale}
-                        onChange={(e) =>
-                          handleGroupScaleChange(parseFloat(e.target.value))
-                        }
+                        onChange={(e) => {
+                          const v = parseFloat(e.currentTarget.value);
+                          handleGroupScaleChange(Number.isFinite(v) ? v : 1);
+                        }}
+                        onInput={(e) => {
+                          const v = parseFloat((e.target as HTMLInputElement).value);
+                          if (Number.isFinite(v)) handleGroupScaleChange(v);
+                        }}
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-300">Group angle</span>
+                        <span className="text-white font-mono text-xs">
+                          {Math.round(groupAngle)}°
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={GROUP_ANGLE_MIN}
+                        max={GROUP_ANGLE_MAX}
+                        step={1}
+                        value={groupAngle}
+                        onChange={(e) => handleGroupAngleChange(parseFloat(e.currentTarget.value))}
                         className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
                       />
                     </div>
@@ -1762,14 +2124,23 @@ export const ManualDesignerPage: React.FC = () => {
             {selectedLedIds.size >= 2 && (
               <>
                 <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
-                <div className="flex items-center gap-0.5" role="group" aria-label="Align">
+                <div className="flex items-center gap-0.5" role="group" aria-label="Align and grid">
                   <button
                     type="button"
                     title="Align horizontal"
                     onClick={handleAlignCenterH}
                     className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
                       <line x1="4" y1="6" x2="20" y2="6" />
                       <line x1="8" y1="12" x2="16" y2="12" />
                       <line x1="6" y1="18" x2="18" y2="18" />
@@ -1781,10 +2152,41 @@ export const ManualDesignerPage: React.FC = () => {
                     onClick={handleAlignMiddleV}
                     className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
                       <line x1="6" y1="4" x2="6" y2="20" />
                       <line x1="12" y1="8" x2="12" y2="16" />
                       <line x1="18" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Arrange selected modules into a grid"
+                    onClick={handleArrangeGrid}
+                    className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+                  >
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="7" height="7" />
+                      <rect x="14" y="3" width="4" height="4" />
+                      <rect x="3" y="14" width="4" height="4" />
+                      <rect x="14" y="14" width="7" height="7" />
                     </svg>
                   </button>
                 </div>
