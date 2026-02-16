@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useProjectStore } from './data/store';
 import { CanvasStage } from './components/canvas/CanvasStage';
 import { Button } from './components/ui/Button';
@@ -5,8 +6,32 @@ import { MODULE_CATALOG } from './data/catalog/modules';
 import { SUPPORTED_LANGUAGES } from './data/languages';
 import { generatePDFReport } from './utils/pdfReport';
 import { ManualDesignerPage } from './components/editor/ManualDesignerPage';
+import { useAuthStore } from './state/authStore';
+import { useProjectsStore } from './state/projectsStore';
 
 function App() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [projectName, setProjectName] = useState('');
+
+  const {
+    user,
+    status: authStatus,
+    errorMessage: authError,
+    login,
+    logout,
+    bootstrap,
+  } = useAuthStore();
+
+  const {
+    projects,
+    loading: projectsLoading,
+    errorMessage: projectsError,
+    saveCurrentProject,
+    loadProjects,
+    openProject,
+  } = useProjectsStore();
+
   const {
     blocks,
     depthInches,
@@ -26,6 +51,15 @@ function App() {
     dimensionUnit,
     setDimensionUnit,
   } = useProjectStore();
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await login({ email, password });
+  };
 
   const currentModule = MODULE_CATALOG.find((m) => m.id === selectedModuleId);
 
@@ -50,9 +84,83 @@ function App() {
     });
   };
 
+  const handleSaveProject = async () => {
+    if (!projectName.trim()) {
+      const name = window.prompt('Enter a project name:');
+      if (!name) return;
+      setProjectName(name);
+      await saveCurrentProject(name);
+    } else {
+      await saveCurrentProject(projectName);
+    }
+  };
+
+  const handleLoadProjects = async () => {
+    await loadProjects();
+  };
+
+  if (authStatus === 'initializing' || authStatus === 'authenticating') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
+        <div className="text-center space-y-2">
+          <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto" />
+          <p className="text-slate-400 text-sm">Checking your session…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 px-4">
+        <div className="w-full max-w-md bg-slate-900/80 border border-slate-700 rounded-2xl p-8 shadow-xl space-y-6">
+          <div className="text-center space-y-2">
+            <h1 className="text-2xl font-bold">Qwatt LED Configurator</h1>
+            <p className="text-slate-400 text-sm">
+              Log in to access your projects and layouts.
+            </p>
+          </div>
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-sm text-slate-300">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm text-slate-300">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+            {authError && (
+              <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 px-3 py-2 rounded-lg">
+                {authError}
+              </p>
+            )}
+            <button
+              type="submit"
+              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-60"
+            >
+              Log in
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 font-sans text-slate-100">
-      <header className="mb-8 flex justify-between items-center">
+      <header className="mb-6 flex justify-between items-center">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
             <svg
@@ -75,25 +183,92 @@ function App() {
             <p className="text-slate-400 text-sm">Professional Channel Letter Signage Tool</p>
           </div>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={() => window.print()}>
-            Print Preview
-          </Button>
-          <Button onClick={handleGeneratePDF}>
-            <span className="flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              </svg>
-              Export PDF
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            <span>Signed in as</span>
+            <span className="px-2 py-1 rounded-full bg-slate-800/80 text-slate-100">
+              {user.displayName || user.email}
             </span>
-          </Button>
+            <button
+              type="button"
+              onClick={logout}
+              className="text-slate-400 hover:text-red-300 text-xs underline-offset-2 hover:underline"
+            >
+              Log out
+            </button>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => window.print()}>
+              Print Preview
+            </Button>
+            <Button onClick={handleGeneratePDF}>
+              <span className="flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  />
+                </svg>
+                Export PDF
+              </span>
+            </Button>
+          </div>
         </div>
       </header>
+
+      <section className="mb-6 flex flex-wrap items-center gap-3 bg-slate-900/40 border border-slate-700/60 rounded-2xl px-4 py-3 text-sm">
+        <div className="flex-1 min-w-[200px] flex items-center gap-2">
+          <label className="text-slate-300">Project name</label>
+          <input
+            type="text"
+            value={projectName}
+            onChange={(e) => setProjectName(e.target.value)}
+            className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950/60 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder="e.g. ACME Main Sign"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={handleSaveProject} disabled={projectsLoading}>
+            Save project
+          </Button>
+          <Button variant="outline" onClick={handleLoadProjects} disabled={projectsLoading}>
+            Load projects
+          </Button>
+        </div>
+        {projectsLoading && (
+          <span className="text-xs text-slate-400">Syncing projects…</span>
+        )}
+        {projectsError && (
+          <span className="text-xs text-red-400">Error: {projectsError}</span>
+        )}
+      </section>
+
+      {projects.length > 0 && (
+        <section className="mb-6 bg-slate-900/40 border border-slate-700/60 rounded-2xl px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+              Your projects
+            </h2>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {projects.map((project) => (
+              <button
+                key={project._id}
+                type="button"
+                onClick={() => openProject(project._id)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700 text-xs text-slate-100 border border-slate-700/80"
+              >
+                {project.name || 'Untitled'}{' '}
+                <span className="text-slate-500">
+                  ({new Date(project.updatedAt).toLocaleDateString()})
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <main className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Controls (3 cols) */}
