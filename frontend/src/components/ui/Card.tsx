@@ -1,22 +1,32 @@
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
+import { cn } from '../../lib/cn';
 
-interface CardProps {
+interface CardProps extends HTMLAttributes<HTMLDivElement> {
   title?: string;
   description?: string;
+  actions?: ReactNode;
   children?: ReactNode;
 }
 
-export function Card({ title, description, children }: CardProps) {
+export function Card({ title, description, actions, children, className, ...props }: CardProps) {
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/80 shadow-sm">
-      {(title || description) && (
-        <div className="px-6 pt-5 pb-3 border-b border-slate-800">
-          {title && <h2 className="text-sm font-semibold text-slate-100">{title}</h2>}
-          {description && <p className="mt-1 text-xs text-slate-400">{description}</p>}
-        </div>
+    <section
+      className={cn(
+        'rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-1)] shadow-[var(--shadow-sm)]',
+        className,
       )}
-      <div className="px-6 py-4">{children}</div>
-    </div>
+      {...props}
+    >
+      {(title || description || actions) && (
+        <header className="flex items-start justify-between gap-3 border-b border-[var(--border-1)] px-5 py-4">
+          <div>
+            {title && <h2 className="text-sm font-semibold text-[var(--text-1)]">{title}</h2>}
+            {description && <p className="mt-1 text-xs text-[var(--text-3)]">{description}</p>}
+          </div>
+          {actions}
+        </header>
+      )}
+      <div className="px-5 py-4">{children}</div>
+    </section>
   );
 }
-

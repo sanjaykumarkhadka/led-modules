@@ -436,8 +436,8 @@ export const CanvasStage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-slate-900">
-        <div className="text-slate-400 flex items-center gap-3">
+      <div className="w-full h-full flex items-center justify-center bg-[var(--surface-1)]">
+        <div className="text-[var(--text-3)] flex items-center gap-3">
           <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
             <circle
               className="opacity-25"
@@ -460,7 +460,7 @@ export const CanvasStage: React.FC = () => {
   }
 
   return (
-    <div className="canvas-stage-container relative w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 rounded-lg overflow-hidden">
+    <div className="canvas-stage-container relative w-full h-full flex items-center justify-center bg-[radial-gradient(circle_at_10%_8%,rgba(51,211,245,0.14),transparent_35%),linear-gradient(135deg,#0b141d,#101b25)] border border-[var(--border-1)] rounded-[var(--radius-lg)] overflow-hidden">
       <svg
         ref={svgRef}
         width="100%"
@@ -475,7 +475,7 @@ export const CanvasStage: React.FC = () => {
             <path
               d="M 20 0 L 0 0 0 20"
               fill="none"
-              stroke="rgba(148, 163, 184, 0.1)"
+              stroke="rgba(193, 207, 221, 0.12)"
               strokeWidth="0.5"
             />
           </pattern>
@@ -508,7 +508,7 @@ export const CanvasStage: React.FC = () => {
         </defs>
 
         {/* Background */}
-        <rect width="100%" height="100%" fill="#0f172a" />
+        <rect width="100%" height="100%" fill="#0c131c" />
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         {/* Per-character letter rendering */}
@@ -567,15 +567,15 @@ export const CanvasStage: React.FC = () => {
             width="140"
             height="28"
             rx="14"
-            fill="rgba(59, 130, 246, 0.15)"
-            stroke="#3b82f6"
+            fill="rgba(51, 211, 245, 0.14)"
+            stroke="#33d3f5"
             strokeWidth="1"
           />
           <text
             x="70"
             y="18"
             textAnchor="middle"
-            fill="#60a5fa"
+            fill="#7fe7ff"
             fontSize="12"
             fontFamily="system-ui"
             fontWeight="600"
@@ -594,15 +594,15 @@ export const CanvasStage: React.FC = () => {
             width="130"
             height="28"
             rx="14"
-            fill={fonts.size > 0 ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)'}
-            stroke={fonts.size > 0 ? '#22c55e' : '#eab308'}
+            fill={fonts.size > 0 ? 'rgba(79, 216, 146, 0.16)' : 'rgba(226, 181, 102, 0.16)'}
+            stroke={fonts.size > 0 ? '#4fd892' : '#e2b566'}
             strokeWidth="1"
           />
           <text
             x="65"
             y="18"
             textAnchor="middle"
-            fill={fonts.size > 0 ? '#22c55e' : '#eab308'}
+            fill={fonts.size > 0 ? '#8cecbc' : '#ffd491'}
             fontSize="11"
             fontFamily="system-ui"
             fontWeight="500"
@@ -615,8 +615,8 @@ export const CanvasStage: React.FC = () => {
       </svg>
 
       {selectedCharId && selectedCharInfo && (
-        <div className="absolute left-4 top-4 z-40 bg-slate-900/90 border border-slate-700 rounded-xl p-4 shadow-xl w-[280px]">
-          <div className="text-xs text-slate-400 uppercase tracking-wide">Selected Character</div>
+        <div className="absolute left-4 top-4 z-40 w-[300px] rounded-[var(--radius-lg)] border border-[var(--border-2)] bg-[rgba(11,18,25,0.92)] p-4 shadow-[var(--shadow-md)]">
+          <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Selected Character</div>
           <div className="flex items-center gap-3 mt-2">
             <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl font-bold text-white">
               {selectedCharInfo.char || '·'}

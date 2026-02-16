@@ -1,5 +1,8 @@
 import { formatDistanceToNow } from 'date-fns';
 import type { Project } from '../../api/projects';
+import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
+import { Card } from '../ui/Card';
 
 interface ProjectCardProps {
   project: Project;
@@ -11,38 +14,36 @@ export function ProjectCard({ project, onOpen, onDelete }: ProjectCardProps) {
   const updatedLabel = formatDistanceToNow(new Date(project.updatedAt), { addSuffix: true });
 
   return (
-    <div className="group relative flex flex-col items-stretch rounded-xl border border-slate-800 bg-slate-900/60 hover:bg-slate-900/90 hover:border-blue-500/60 transition-colors shadow-sm hover:shadow-md text-left p-3">
-      <div className="flex items-start gap-2 mb-2 cursor-pointer" onClick={onOpen}>
-        <div className="mt-0.5 w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/70 to-cyan-500/70 flex items-center justify-center text-slate-950 text-xs font-semibold">
-          LED
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-slate-100 truncate">
-            {project.name || 'Untitled project'}
+    <Card className="group transition-colors hover:border-[var(--accent-700)]">
+      <div className="space-y-4">
+        <div className="cursor-pointer" onClick={onOpen}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="truncate text-sm font-semibold text-[var(--text-1)]">
+                {project.name || 'Untitled project'}
+              </h3>
+              <p className="mt-1 line-clamp-2 text-xs text-[var(--text-3)]">
+                {project.description || 'Channel-letter layout and engineering profile'}
+              </p>
+            </div>
+            <Badge variant="accent">LED</Badge>
           </div>
-          <div className="text-xs text-slate-500 truncate">
-            {project.description || 'Channel letter layout'}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--border-1)] pt-3 text-[11px] text-[var(--text-4)]">
+          <span>Updated {updatedLabel}</span>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={onOpen}>
+              Open
+            </Button>
+            {onDelete && (
+              <Button size="sm" variant="ghost" onClick={onDelete}>
+                Delete
+              </Button>
+            )}
           </div>
         </div>
       </div>
-      <div className="mt-auto flex items-center justify-between text-[11px] text-slate-500">
-        <span>Updated {updatedLabel}</span>
-        <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-300">
-            LED layout
-          </span>
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-slate-500 hover:text-red-300 text-xs"
-            >
-              Delete
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+    </Card>
   );
 }
-

@@ -12,14 +12,7 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  const {
-    user,
-    status: authStatus,
-    errorMessage: authError,
-    login,
-    logout,
-    bootstrap,
-  } = useAuthStore();
+  const { user, status: authStatus, errorMessage: authError, login, logout, bootstrap } = useAuthStore();
 
   useEffect(() => {
     void bootstrap();
@@ -32,57 +25,47 @@ function App() {
 
   if (authStatus === 'initializing' || authStatus === 'authenticating') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
-        <div className="text-center space-y-2">
-          <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto" />
-          <p className="text-slate-400 text-sm">Checking your session…</p>
-        </div>
+      <div className="grid min-h-screen place-items-center px-4">
+        <Card className="w-full max-w-md">
+          <div className="space-y-3 text-center">
+            <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[var(--accent-500)] border-r-transparent" />
+            <p className="text-sm text-[var(--text-2)]">Checking secure session...</p>
+          </div>
+        </Card>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 px-4">
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-8 items-center">
-          <div className="space-y-4">
-            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              Design production-ready LED layouts with confidence.
-            </h1>
-            <p className="text-sm text-slate-400 max-w-md">
-              Qwatt helps signage teams plan LED population, wiring, and power with accurate
-              engineering data — so every channel letter ships right the first time.
+      <div className="min-h-screen px-4 py-8 md:px-8">
+        <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-8 md:grid-cols-[1.15fr_0.85fr]">
+          <section className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-1)] p-7 shadow-[var(--shadow-md)]">
+            <p className="text-xs uppercase tracking-[0.12em] text-[var(--accent-300)]">Qwatt Production Suite</p>
+            <h1 className="mt-3 text-4xl font-semibold leading-tight">Professional LED layout engineering, rebuilt for production teams.</h1>
+            <p className="mt-3 max-w-xl text-sm text-[var(--text-3)]">
+              Build accurate channel-letter designs, validate module population, and export engineering-ready plans with consistent quality control.
             </p>
-            <ul className="space-y-2 text-xs text-slate-300">
-              <li>• Rapid LED population with manual fine-tuning</li>
-              <li>• Instant power calculations and PSU recommendations</li>
-              <li>• Project-based workflow for your entire team</li>
-            </ul>
-          </div>
-          <Card title="Sign in" description="Access your projects and continue where you left off.">
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Card title="Layout" description="High-fidelity character-level LED planning." />
+              <Card title="Power" description="Instant module count and PSU recommendations." />
+              <Card title="Export" description="Technical PDF output for handoff and archive." />
+            </div>
+          </section>
+
+          <Card title="Sign in" description="Access your project workspace and continue where you left off.">
             <form onSubmit={handleAuthSubmit} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs text-slate-300">Email</label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  error={undefined}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-slate-300">Password</label>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  error={authError || undefined}
-                />
-              </div>
+              <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input
+                label="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                error={authError || undefined}
+              />
               <Button type="submit" className="w-full justify-center">
-                Log in
+                Sign in to workspace
               </Button>
             </form>
           </Card>
@@ -96,7 +79,7 @@ function App() {
       userDisplayName={user.displayName || user.email}
       onLogout={logout}
       headerActions={
-        <Button variant="outline" onClick={() => window.print()}>
+        <Button variant="secondary" size="sm" onClick={() => window.print()}>
           Print Preview
         </Button>
       }

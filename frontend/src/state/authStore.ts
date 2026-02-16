@@ -31,6 +31,14 @@ function clearPersistedTokens() {
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+function toErrorMessage(err: unknown, fallback: string) {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return fallback;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   accessToken: null,
@@ -50,10 +58,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: 'authenticated',
         errorMessage: null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         status: 'error',
-        errorMessage: err?.message ?? 'Failed to sign up',
+        errorMessage: toErrorMessage(err, 'Failed to sign up'),
       });
     }
   },
@@ -70,10 +78,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         status: 'authenticated',
         errorMessage: null,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         status: 'error',
-        errorMessage: err?.message ?? 'Failed to log in',
+        errorMessage: toErrorMessage(err, 'Failed to log in'),
       });
     }
   },
@@ -157,4 +165,3 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
-

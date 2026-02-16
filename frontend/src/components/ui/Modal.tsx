@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Button } from './Button';
 
 interface ModalProps {
   title: string;
@@ -6,30 +7,31 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   children: ReactNode;
+  footer?: ReactNode;
 }
 
-export function Modal({ title, description, isOpen, onClose, children }: ModalProps) {
+export function Modal({ title, description, isOpen, onClose, children, footer }: ModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-2xl bg-slate-950 border border-slate-800 shadow-2xl">
-        <div className="px-5 pt-4 pb-3 border-b border-slate-800">
-          <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
-          {description && <p className="mt-1 text-xs text-slate-400">{description}</p>}
+    <div className="fixed inset-0 z-[var(--z-dialog)] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-lg rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-1)] shadow-[var(--shadow-lg)]">
+        <div className="border-b border-[var(--border-1)] px-5 py-4">
+          <h2 className="text-sm font-semibold text-[var(--text-1)]">{title}</h2>
+          {description && <p className="mt-1 text-xs text-[var(--text-3)]">{description}</p>}
         </div>
-        <div className="px-5 py-4 space-y-4">{children}</div>
-        <div className="px-5 pb-4 pt-1 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2"
-          >
-            Cancel
-          </button>
+        <div className="px-5 py-4">{children}</div>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--border-1)] px-5 py-4">
+          {footer ?? (
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          )}
         </div>
       </div>
+      <button className="sr-only" onClick={onClose} type="button">
+        Close dialog
+      </button>
     </div>
   );
 }
-

@@ -38,6 +38,14 @@ interface ProjectsState {
   deleteProjectById: (id: string) => Promise<void>;
 }
 
+function toErrorMessage(err: unknown, fallback: string) {
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return fallback;
+}
+
 function serializeDesign(): DesignData {
   const state = useProjectStore.getState();
   return {
@@ -85,10 +93,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     try {
       const projects = await listProjects(accessToken);
       set({ projects, loading: false });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         loading: false,
-        errorMessage: err?.message ?? 'Failed to load projects',
+        errorMessage: toErrorMessage(err, 'Failed to load projects'),
       });
     }
   },
@@ -108,10 +116,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
         currentProjectId: project._id,
         loading: false,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         loading: false,
-        errorMessage: err?.message ?? 'Failed to open project',
+        errorMessage: toErrorMessage(err, 'Failed to open project'),
       });
     }
   },
@@ -144,10 +152,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
         projects,
         loading: false,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         loading: false,
-        errorMessage: err?.message ?? 'Failed to save project',
+        errorMessage: toErrorMessage(err, 'Failed to save project'),
       });
     }
   },
@@ -168,12 +176,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
         loading: false,
         currentProjectId: get().currentProjectId === id ? null : get().currentProjectId,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       set({
         loading: false,
-        errorMessage: err?.message ?? 'Failed to delete project',
+        errorMessage: toErrorMessage(err, 'Failed to delete project'),
       });
     }
   },
 }));
-
