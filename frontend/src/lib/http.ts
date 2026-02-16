@@ -1,0 +1,56 @@
+import { API_BASE_URL } from './config';
+
+export interface HttpError extends Error {
+  status: number;
+  details?: unknown;
+}
+
+export interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  accessToken?: string | null;
+  signal?: AbortSignal;
+}
+
+export async function http<TResponse>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<TResponse> {
+  const url = `${API_BASE_URL}${path}`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (options.accessToken) {
+    headers.Authorization = `Bearer ${options.accessToken}`;
+  }
+
+  const response = await fetch(url, {
+    method: options.method ?? 'GET',
+    headers,
+    body:
+      options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
+  });
+
+  const text = await response.text();
+  const data = text ? (JSON.parse(text) as unknown) : null;
+
+  if (!response.ok) {
+    const error: HttpError = Object.assign(
+      new Error(
+        (data as any)?.message ??
+          `Request failed with status ${response.status}`,
+      ),
+      {
+        status: response.status,
+        details: data,
+      },
+    );
+    throw error;
+  }
+
+  return data as TResponse;
+}
+
