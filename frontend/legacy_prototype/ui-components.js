@@ -1,23 +1,23 @@
 // ui-components.js - UI component generation and management
 
 class UIComponents {
-    constructor() {
-        this.initializeComponents();
-    }
+  constructor() {
+    this.initializeComponents();
+  }
 
-    initializeComponents() {
-        this.loadConfigurationForm();
-        this.loadToolbar();
-        this.loadResultsPanel();
-        this.loadEditorPanel();
-        this.loadLEDControlPanel();
-    }
+  initializeComponents() {
+    this.loadConfigurationForm();
+    this.loadToolbar();
+    this.loadResultsPanel();
+    this.loadEditorPanel();
+    this.loadLEDControlPanel();
+  }
 
-    loadConfigurationForm() {
-        const configForm = document.getElementById('configForm');
-        if (!configForm) return;
+  loadConfigurationForm() {
+    const configForm = document.getElementById('configForm');
+    if (!configForm) return;
 
-        configForm.innerHTML = `
+    configForm.innerHTML = `
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <!-- Layout Type -->
                 <div>
@@ -142,13 +142,13 @@ class UIComponents {
                 </div>
             </div>
         `;
-    }
+  }
 
-    loadToolbar() {
-        const toolbar = document.getElementById('toolbar');
-        if (!toolbar) return;
+  loadToolbar() {
+    const toolbar = document.getElementById('toolbar');
+    if (!toolbar) return;
 
-        toolbar.innerHTML = `
+    toolbar.innerHTML = `
             <div class="flex flex-wrap gap-2">
                 <button id="rotateLeft" class="tool-button w-10 h-10 flex items-center justify-center border border-gray-300 rounded-lg hover:bg-gray-100">
                     <i class="fas fa-undo-alt"></i>
@@ -179,13 +179,13 @@ class UIComponents {
                 </button>
             </div>
         `;
-    }
+  }
 
-    loadResultsPanel() {
-        const resultsPanel = document.getElementById('resultsPanel');
-        if (!resultsPanel) return;
+  loadResultsPanel() {
+    const resultsPanel = document.getElementById('resultsPanel');
+    if (!resultsPanel) return;
 
-        resultsPanel.innerHTML = `
+    resultsPanel.innerHTML = `
             <h3 class="text-lg font-semibold mb-4">Calculation Results</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="bg-gray-50 p-4 rounded-lg">
@@ -214,13 +214,13 @@ class UIComponents {
                 </div>
             </div>
         `;
-    }
+  }
 
-    loadEditorPanel() {
-        const editorPanel = document.getElementById('editorPanel');
-        if (!editorPanel) return;
+  loadEditorPanel() {
+    const editorPanel = document.getElementById('editorPanel');
+    if (!editorPanel) return;
 
-        editorPanel.innerHTML = `
+    editorPanel.innerHTML = `
             <h3 class="text-lg font-semibold mb-4 flex items-center">
                 <i class="fas fa-sliders-h mr-2 text-blue-500"></i> Editor
             </h3>
@@ -282,13 +282,13 @@ class UIComponents {
                 </div>
             </div>
         `;
-    }
+  }
 
-    loadLEDControlPanel() {
-        const ledControlPanel = document.getElementById('ledControlPanel');
-        if (!ledControlPanel) return;
+  loadLEDControlPanel() {
+    const ledControlPanel = document.getElementById('ledControlPanel');
+    if (!ledControlPanel) return;
 
-        ledControlPanel.innerHTML = `
+    ledControlPanel.innerHTML = `
             <h3 class="text-lg font-semibold mb-4 flex items-center">
                 <i class="fas fa-lightbulb mr-2 text-yellow-500"></i> LED Control
             </h3>
@@ -327,16 +327,16 @@ class UIComponents {
                 </button>
             </div>
         `;
-    }
+  }
 
-    generateCharacterLibrary() {
-        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-        let html = '';
-        for (let char of characters) {
-            html += `<button class="character-card bg-gray-50 p-3 rounded-lg text-center font-bold hover:shadow transition cursor-pointer" data-char="${char}">${char}</button>`;
-        }
-        return html;
+  generateCharacterLibrary() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    let html = '';
+    for (let char of characters) {
+      html += `<button class="character-card bg-gray-50 p-3 rounded-lg text-center font-bold hover:shadow transition cursor-pointer" data-char="${char}">${char}</button>`;
     }
+    return html;
+  }
 }
 
 // Export for use in other modules
