@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectsStore } from '../state/projectsStore';
+import type { Project } from '../api/projects';
 import { Button } from '../components/ui/Button';
 import { ProjectCard } from '../components/projects/ProjectCard';
 import { Modal } from '../components/ui/Modal';
@@ -9,15 +10,28 @@ import { useToast } from '../components/ui/ToastProvider';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { EmptyState } from '../components/ui/EmptyState';
 import { InlineError } from '../components/ui/InlineError';
-import { Panel } from '../components/ui/Panel';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
 
 export function ProjectsOverviewPage() {
   const [search, setSearch] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isNewOpen, setIsNewOpen] = useState(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [editName, setEditName] = useState('');
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
   const navigate = useNavigate();
-  const { projects, loading, errorMessage, loadProjects, deleteProjectById } = useProjectsStore();
+  const {
+    projects,
+    loading,
+    errorMessage,
+    loadProjects,
+    createProjectEntry,
+    renameProjectById,
+    deleteProjectById,
+  } =
+    useProjectsStore();
   const { notify } = useToast();
   const { confirm } = useConfirm();
 
@@ -40,43 +54,64 @@ export function ProjectsOverviewPage() {
     setIsNewOpen(true);
   };
 
-  const handleCreateNewProject = (e: React.FormEvent) => {
+  const handleCreateNewProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
 
+    await createProjectEntry(newName.trim(), newDescription.trim() || undefined);
     setIsNewOpen(false);
     notify({
       variant: 'success',
       title: 'Project created',
-      description: 'New project started. Configure your layout now.',
+      description: 'Project created successfully. Click it from the list to open.',
     });
-    navigate('/projects/new', {
-      state: { name: newName.trim(), description: newDescription.trim() || undefined },
-    });
+  };
+
+  const handleOpenEditProject = (project: Project) => {
+    setProjectToEdit(project);
+    setEditName(project.name || '');
+    setIsEditOpen(true);
+  };
+
+  const handleRenameProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projectToEdit || !editName.trim()) return;
+    await renameProjectById(projectToEdit._id, editName.trim());
+    setIsEditOpen(false);
+    setProjectToEdit(null);
+    notify({ variant: 'success', title: 'Project updated' });
   };
 
   const isEmpty = !loading && projects.length === 0 && !search;
 
   return (
     <div className="space-y-6">
-      <Panel className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">Projects</h1>
-          <p className="mt-1 text-xs text-[var(--text-3)]">
-            Manage all layouts and re-open designs for production revisions.
-          </p>
+      <header className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-medium">Projects ({projects.length})</h1>
+            <p className="mt-1 text-sm text-[var(--text-3)]">Browse and manage signage engineering files.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search projects"
+              className="w-72"
+            />
+            <SegmentedControl
+              value={viewMode}
+              onChange={(value) => setViewMode(value as 'grid' | 'list')}
+              options={[
+                { label: 'Grid', value: 'grid' },
+                { label: 'List', value: 'list' },
+              ]}
+            />
+            <Button onClick={handleNewProject}>Create project</Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search projects"
-            className="w-56"
-          />
-          <Button onClick={handleNewProject}>New project</Button>
-        </div>
-      </Panel>
+      </header>
 
       {errorMessage && <InlineError message={errorMessage} />}
       {loading && <p className="text-xs text-[var(--text-3)]">Loading your projects...</p>}
@@ -88,12 +123,14 @@ export function ProjectsOverviewPage() {
           action={<Button onClick={handleNewProject}>Create first project</Button>}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className={viewMode === 'grid' ? 'grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3' : 'space-y-3'}>
           {filteredProjects.map((project) => (
             <ProjectCard
               key={project._id}
               project={project}
+              mode={viewMode}
               onOpen={() => navigate(`/projects/${project._id}`)}
+              onEdit={() => handleOpenEditProject(project)}
               onDelete={async () => {
                 const confirmed = await confirm({
                   title: 'Delete project?',
@@ -116,7 +153,7 @@ export function ProjectsOverviewPage() {
         isOpen={isNewOpen}
         onClose={() => setIsNewOpen(false)}
       >
-        <form onSubmit={handleCreateNewProject} className="space-y-4">
+        <form onSubmit={(e) => void handleCreateNewProject(e)} className="space-y-4">
           <Input
             label="Project name"
             type="text"
@@ -134,7 +171,33 @@ export function ProjectsOverviewPage() {
           />
           <div className="flex justify-end">
             <Button type="submit" size="sm">
-              Start designing
+              Create project
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        title="Edit project"
+        description="Update project name."
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setProjectToEdit(null);
+        }}
+      >
+        <form onSubmit={(e) => void handleRenameProject(e)} className="space-y-4">
+          <Input
+            label="Project name"
+            type="text"
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Project name"
+            required
+          />
+          <div className="flex justify-end">
+            <Button type="submit" size="sm">
+              Save
             </Button>
           </div>
         </form>

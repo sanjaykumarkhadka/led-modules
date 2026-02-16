@@ -39,10 +39,8 @@ export const CanvasStage: React.FC = () => {
     getCharLedCount,
     getCharLedColumns,
     getCharLedOrientation,
-    setCharPlacementMode,
     getCharPlacementMode,
     getCharManualLeds,
-    openEditor,
   } = useProjectStore();
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -131,17 +129,6 @@ export const CanvasStage: React.FC = () => {
       selectChar(charId);
     },
     [selectChar]
-  );
-
-  const handleApplyPlacementMode = useCallback(
-    (charId: string, mode: 'auto' | 'manual') => {
-      setCharPlacementMode(charId, mode);
-      // Auto mode should re-populate
-      if (mode === 'auto') {
-        useProjectStore.getState().triggerPopulation();
-      }
-    },
-    [setCharPlacementMode]
   );
 
   // Handle clicking on background to deselect
@@ -403,40 +390,9 @@ export const CanvasStage: React.FC = () => {
     };
   }, [blockCharPaths]);
 
-  // Get selected character info for panel
-  const selectedCharInfo = useMemo(() => {
-    if (!selectedCharId) return null;
-
-    const [blockId, charIndexStr] = selectedCharId.split('-');
-    const charIndex = parseInt(charIndexStr, 10);
-
-    const blockPaths = blockCharPaths.find((bp) => bp.blockId === blockId);
-    if (!blockPaths) return null;
-
-    const charPath = blockPaths.charPaths.find((cp) => cp.charIndex === charIndex);
-    if (!charPath) return null;
-
-    return {
-      char: charPath.char,
-      currentCount: getCharLedCount(selectedCharId),
-      currentColumns: getCharLedColumns(selectedCharId),
-      currentOrientation: getCharLedOrientation(selectedCharId),
-      placementMode: getCharPlacementMode(selectedCharId),
-      manualCount: getCharManualLeds(selectedCharId).length,
-    };
-  }, [
-    selectedCharId,
-    blockCharPaths,
-    getCharLedCount,
-    getCharLedColumns,
-    getCharLedOrientation,
-    getCharPlacementMode,
-    getCharManualLeds,
-  ]);
-
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-[var(--surface-1)]">
+      <div className="w-full h-full flex items-center justify-center bg-[var(--surface-panel)]">
         <div className="text-[var(--text-3)] flex items-center gap-3">
           <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
             <circle
@@ -460,7 +416,7 @@ export const CanvasStage: React.FC = () => {
   }
 
   return (
-    <div className="canvas-stage-container relative w-full h-full flex items-center justify-center bg-[radial-gradient(circle_at_10%_8%,rgba(51,211,245,0.14),transparent_35%),linear-gradient(135deg,#0b141d,#101b25)] border border-[var(--border-1)] rounded-[var(--radius-lg)] overflow-hidden">
+    <div className="canvas-stage-container relative w-full h-full flex items-center justify-center rounded-none bg-[var(--stage-bg)] overflow-hidden">
       <svg
         ref={svgRef}
         width="100%"
@@ -475,7 +431,7 @@ export const CanvasStage: React.FC = () => {
             <path
               d="M 20 0 L 0 0 0 20"
               fill="none"
-              stroke="rgba(193, 207, 221, 0.12)"
+              stroke="var(--stage-grid-line)"
               strokeWidth="0.5"
             />
           </pattern>
@@ -508,7 +464,7 @@ export const CanvasStage: React.FC = () => {
         </defs>
 
         {/* Background */}
-        <rect width="100%" height="100%" fill="#0c131c" />
+        <rect width="100%" height="100%" fill="var(--stage-bg)" />
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         {/* Per-character letter rendering */}
@@ -549,11 +505,11 @@ export const CanvasStage: React.FC = () => {
                   rx={2.5}
                   ry={2.5}
                   fill="none"
-                  stroke={isManual ? '#38bdf8' : '#334155'}
+                  stroke={isManual ? '#3b82f6' : '#94a3b8'}
                   strokeWidth={0.8}
                 />
-                <circle cx={led.x - 3.5} cy={led.y} r={1.2} fill="#334155" />
-                <circle cx={led.x + 3.5} cy={led.y} r={1.2} fill="#334155" />
+                <circle cx={led.x - 3.5} cy={led.y} r={1.2} fill="#64748b" />
+                <circle cx={led.x + 3.5} cy={led.y} r={1.2} fill="#64748b" />
               </g>
             );
           })
@@ -567,15 +523,15 @@ export const CanvasStage: React.FC = () => {
             width="140"
             height="28"
             rx="14"
-            fill="rgba(51, 211, 245, 0.14)"
-            stroke="#33d3f5"
+            fill="rgba(37, 99, 235, 0.12)"
+            stroke="#2563eb"
             strokeWidth="1"
           />
           <text
             x="70"
             y="18"
             textAnchor="middle"
-            fill="#7fe7ff"
+            fill="#1d4ed8"
             fontSize="12"
             fontFamily="system-ui"
             fontWeight="600"
@@ -594,15 +550,15 @@ export const CanvasStage: React.FC = () => {
             width="130"
             height="28"
             rx="14"
-            fill={fonts.size > 0 ? 'rgba(79, 216, 146, 0.16)' : 'rgba(226, 181, 102, 0.16)'}
-            stroke={fonts.size > 0 ? '#4fd892' : '#e2b566'}
+            fill={fonts.size > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(245, 158, 11, 0.14)'}
+            stroke={fonts.size > 0 ? '#16a34a' : '#d97706'}
             strokeWidth="1"
           />
           <text
             x="65"
             y="18"
             textAnchor="middle"
-            fill={fonts.size > 0 ? '#8cecbc' : '#ffd491'}
+            fill={fonts.size > 0 ? '#15803d' : '#92400e'}
             fontSize="11"
             fontFamily="system-ui"
             fontWeight="500"
@@ -613,54 +569,6 @@ export const CanvasStage: React.FC = () => {
           </text>
         </g>
       </svg>
-
-      {selectedCharId && selectedCharInfo && (
-        <div className="absolute left-4 top-4 z-40 w-[300px] rounded-[var(--radius-lg)] border border-[var(--border-2)] bg-[rgba(11,18,25,0.92)] p-4 shadow-[var(--shadow-md)]">
-          <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Selected Character</div>
-          <div className="flex items-center gap-3 mt-2">
-            <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-xl font-bold text-white">
-              {selectedCharInfo.char || '·'}
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-white">{selectedCharId}</div>
-              <div className="text-xs text-slate-400">
-                {selectedCharInfo.placementMode === 'manual' ? 'Manual' : 'Auto'} ·{' '}
-                {selectedCharInfo.manualCount} LEDs
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => handleApplyPlacementMode(selectedCharId, 'manual')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold ${
-                selectedCharInfo.placementMode === 'manual'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Manual
-            </button>
-            <button
-              onClick={() => handleApplyPlacementMode(selectedCharId, 'auto')}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-semibold ${
-                selectedCharInfo.placementMode === 'auto'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              Auto
-            </button>
-          </div>
-
-          <button
-            onClick={() => openEditor(selectedCharId)}
-            className="mt-3 w-full px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-400 transition-colors"
-          >
-            Open Manual Designer
-          </button>
-        </div>
-      )}
 
       {showQA && qaResults.length > 0 && (
         <div className="absolute top-3 right-3 z-50 max-w-[360px] bg-slate-950/90 border border-slate-700 rounded-lg p-3 text-xs text-slate-200">

@@ -1224,13 +1224,13 @@ export const ManualDesignerPage: React.FC = () => {
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="fixed inset-0 z-50 text-slate-100">
+    <div className="fixed inset-0 z-[120] isolate text-[var(--text-1)]">
       <div
-        className="absolute inset-0 pointer-events-none bg-slate-950"
+        className="absolute inset-0 pointer-events-none bg-[var(--surface-app)]"
         style={{
           backgroundImage: `
-            linear-gradient(rgba(148,163,184,0.12) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(148,163,184,0.12) 1px, transparent 1px)
+            linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)
           `,
           backgroundSize: '10px 10px',
         }}
@@ -1238,23 +1238,23 @@ export const ManualDesignerPage: React.FC = () => {
       />
       <div className="relative z-10 flex h-full min-h-0">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="h-16 shrink-0 border-b border-slate-800 flex items-center justify-between px-6">
+          <div className="h-16 shrink-0 border-b border-[var(--border-1)] bg-[var(--surface-canvas)] flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-xl font-bold">
+              <div className="w-10 h-10 rounded-xl bg-[var(--surface-subtle)] flex items-center justify-center text-xl font-bold">
                 {charPath?.char || '·'}
               </div>
               <div>
-                <div className="text-sm text-slate-400">Manual Designer</div>
+                <div className="text-sm text-[var(--text-3)]">Manual Designer</div>
                 <div className="text-lg font-semibold">
                   {charPath?.char || 'Character'} · {editorCharId}
                 </div>
               </div>
-              {isDirty && <span className="text-xs text-amber-300">Unsaved changes</span>}
+              {isDirty && <span className="text-xs text-[var(--warning-300)]">Unsaved changes</span>}
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCancel}
-                className="px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200"
+                className="px-4 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]"
               >
                 Back
               </button>
@@ -1262,7 +1262,7 @@ export const ManualDesignerPage: React.FC = () => {
                 onClick={() => {
                   void handleSave();
                 }}
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold"
+                className="px-4 py-2 rounded-lg bg-[var(--accent-500)] text-white font-semibold hover:bg-[var(--accent-600)]"
               >
                 Save Changes
               </button>
@@ -1290,7 +1290,7 @@ export const ManualDesignerPage: React.FC = () => {
               }`}
             >
               {loading && (
-                <div className="absolute inset-0 flex items-center justify-center text-slate-400">
+                <div className="absolute inset-0 flex items-center justify-center text-[var(--text-3)]">
                   Loading font engine...
                 </div>
               )}
@@ -1618,37 +1618,37 @@ export const ManualDesignerPage: React.FC = () => {
               )}
             </div>
 
-            <div className="bg-slate-900 border-l border-slate-800 p-5 space-y-5 overflow-y-auto">
+            <div className="bg-[var(--surface-panel)] border-l border-[var(--border-1)] p-5 space-y-5 overflow-y-auto">
               <div className="space-y-2">
-                <div className="text-xs text-slate-400 uppercase tracking-wide">Module Specs</div>
-                <div className="bg-slate-800 rounded-xl p-4 text-sm space-y-1">
+                <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Module Specs</div>
+                <div className="bg-[var(--surface-elevated)] rounded-xl p-4 text-sm space-y-1 border border-[var(--border-1)]">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Module</span>
-                    <span className="text-white font-semibold">{currentModule.name}</span>
+                    <span className="text-[var(--text-3)]">Module</span>
+                    <span className="text-[var(--text-1)] font-semibold">{currentModule.name}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Voltage</span>
-                    <span className="text-white">{currentModule.voltage}V</span>
+                    <span className="text-[var(--text-3)]">Voltage</span>
+                    <span className="text-[var(--text-1)]">{currentModule.voltage}V</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Watts</span>
-                    <span className="text-white">{currentModule.wattsPerModule} W</span>
+                    <span className="text-[var(--text-3)]">Watts</span>
+                    <span className="text-[var(--text-1)]">{currentModule.wattsPerModule} W</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Total</span>
-                    <span className="text-white">{totalWatts.toFixed(1)} W</span>
+                    <span className="text-[var(--text-3)]">Total</span>
+                    <span className="text-[var(--text-1)]">{totalWatts.toFixed(1)} W</span>
                   </div>
                 </div>
               </div>
 
               {selectedLedIds.size >= 2 && (
                 <div className="space-y-2">
-                  <div className="text-xs text-slate-400 uppercase tracking-wide">Group</div>
-                  <div className="bg-slate-800 rounded-xl p-4 space-y-4 text-sm">
+                  <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Group</div>
+                  <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 space-y-4 text-sm">
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-300">Group spacing</span>
-                        <span className="text-white font-mono text-xs">
+                        <span className="text-[var(--text-2)]">Group spacing</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">
                           {groupSpacing.toFixed(1)}
                         </span>
                       </div>
@@ -1686,13 +1686,13 @@ export const ManualDesignerPage: React.FC = () => {
                             }
                           }
                         }}
-                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
                       />
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-300">Group size</span>
-                        <span className="text-white font-mono text-xs">
+                        <span className="text-[var(--text-2)]">Group size</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">
                           {groupScale.toFixed(2)}
                         </span>
                       </div>
@@ -1710,13 +1710,13 @@ export const ManualDesignerPage: React.FC = () => {
                           const v = parseFloat((e.target as HTMLInputElement).value);
                           if (Number.isFinite(v)) handleGroupScaleChange(v);
                         }}
-                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
                       />
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-300">Group angle</span>
-                        <span className="text-white font-mono text-xs">
+                        <span className="text-[var(--text-2)]">Group angle</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">
                           {Math.round(groupAngle)}°
                         </span>
                       </div>
@@ -1727,7 +1727,7 @@ export const ManualDesignerPage: React.FC = () => {
                         step={1}
                         value={groupAngle}
                         onChange={(e) => handleGroupAngleChange(parseFloat(e.currentTarget.value))}
-                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-600 accent-blue-500"
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
                       />
                     </div>
                   </div>
@@ -1735,13 +1735,13 @@ export const ManualDesignerPage: React.FC = () => {
               )}
 
               <div className="space-y-2">
-                <div className="text-xs text-slate-400 uppercase tracking-wide">
+                <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">
                   Design Controls
                 </div>
-                <div className="bg-slate-800 rounded-xl p-4 space-y-3 text-sm">
+                <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 space-y-3 text-sm">
                   <div className="flex justify-between items-center">
                     <span>LED Count</span>
-                    <span className="text-white font-semibold">{draftLeds.length}</span>
+                    <span className="text-[var(--text-1)] font-semibold">{draftLeds.length}</span>
                   </div>
                   <button
                     onClick={async () => {
@@ -1756,7 +1756,7 @@ export const ManualDesignerPage: React.FC = () => {
                         notify({ variant: 'info', title: 'Modules cleared' });
                       }
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--danger-500)] hover:brightness-95 text-white text-xs font-medium"
                   >
                     Clear all modules
                   </button>
@@ -1767,18 +1767,17 @@ export const ManualDesignerPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Figma-style bottom center toolbar */}
+      {/* Tetra-like left tool rail */}
       <div
-        className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-2 rounded-2xl bg-slate-800/95 border border-slate-700/80 shadow-xl"
+        className="absolute left-4 top-1/2 z-20 -translate-y-1/2 flex flex-col items-center gap-1 rounded-2xl border border-[var(--border-1)] bg-[var(--surface-elevated)] px-2 py-2 shadow-[var(--shadow-md)]"
         role="toolbar"
       >
-        {/* Tools: Pan, Add (place) — select is default, no button */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             title="Pan canvas"
             onClick={() => setTool('pan')}
-            className={`p-2.5 rounded-xl transition-colors ${tool === 'pan' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'}`}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'pan' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
           >
             <svg
               width="20"
@@ -1798,7 +1797,7 @@ export const ManualDesignerPage: React.FC = () => {
             type="button"
             title="Box select — drag on canvas to select all modules in the box"
             onClick={() => setTool('boxSelect')}
-            className={`p-2.5 rounded-xl transition-colors ${tool === 'boxSelect' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'}`}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'boxSelect' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
           >
             <svg
               width="20"
@@ -1817,7 +1816,7 @@ export const ManualDesignerPage: React.FC = () => {
             type="button"
             title="Add mode — click on canvas to place a module"
             onClick={() => setTool('add')}
-            className={`p-2.5 rounded-xl transition-colors ${tool === 'add' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:bg-slate-700/80 hover:text-slate-200'}`}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'add' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
           >
             <svg
               width="20"
@@ -1835,14 +1834,13 @@ export const ManualDesignerPage: React.FC = () => {
             </svg>
           </button>
         </div>
-        <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
-        {/* Global actions: Add LED at center, Zoom, Reset */}
-        <div className="flex items-center gap-0.5">
+        <div className="h-px w-8 bg-[var(--border-1)] my-1" aria-hidden />
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             title="Add LED at center"
             onClick={handleAddAtCenter}
-            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+            className="p-2.5 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
           >
             <svg
               width="20"
@@ -1862,7 +1860,7 @@ export const ManualDesignerPage: React.FC = () => {
             type="button"
             title="Zoom in"
             onClick={handleZoomIn}
-            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+            className="p-2.5 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
           >
             <svg
               width="20"
@@ -1884,7 +1882,7 @@ export const ManualDesignerPage: React.FC = () => {
             type="button"
             title="Reset view"
             onClick={handleFit}
-            className="p-2.5 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+            className="p-2.5 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
           >
             <svg
               width="20"
@@ -1906,13 +1904,13 @@ export const ManualDesignerPage: React.FC = () => {
         {/* Selection-only: Delete and Duplicate — shown when at least one module is selected */}
         {selectedLedIds.size >= 1 && (
           <>
-            <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
+            <div className="h-px w-8 bg-[var(--border-1)] my-1" aria-hidden />
             <div className="flex items-center gap-1">
               <button
                 type="button"
                 title="Delete selected module"
                 onClick={handleDeleteSelected}
-                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-slate-400 hover:bg-red-900/50 hover:text-red-300 transition-colors min-w-[3rem]"
+                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-[var(--text-3)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger-500)] transition-colors min-w-[3rem]"
               >
                 <svg
                   width="20"
@@ -1935,7 +1933,7 @@ export const ManualDesignerPage: React.FC = () => {
                 type="button"
                 title="Duplicate selected module"
                 onClick={handleDuplicateSelected}
-                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors min-w-[3rem]"
+                className="flex flex-col items-center gap-0.5 p-2 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors min-w-[3rem]"
               >
                 <svg
                   width="20"
@@ -1955,13 +1953,13 @@ export const ManualDesignerPage: React.FC = () => {
             </div>
             {selectedLedIds.size >= 2 && (
               <>
-                <div className="w-px h-8 bg-slate-600 mx-1" aria-hidden />
+                <div className="h-px w-8 bg-[var(--border-1)] my-1" aria-hidden />
                 <div className="flex items-center gap-0.5" role="group" aria-label="Align and grid">
                   <button
                     type="button"
                     title="Align horizontal"
                     onClick={handleAlignCenterH}
-                    className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+                    className="p-2 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
                   >
                     <svg
                       width="20"
@@ -1982,7 +1980,7 @@ export const ManualDesignerPage: React.FC = () => {
                     type="button"
                     title="Align vertical"
                     onClick={handleAlignMiddleV}
-                    className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+                    className="p-2 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
                   >
                     <svg
                       width="20"
@@ -2003,7 +2001,7 @@ export const ManualDesignerPage: React.FC = () => {
                     type="button"
                     title="Arrange selected modules into a grid"
                     onClick={handleArrangeGrid}
-                    className="p-2 rounded-xl text-slate-400 hover:bg-slate-700/80 hover:text-slate-200 transition-colors"
+                    className="p-2 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
                   >
                     <svg
                       width="20"

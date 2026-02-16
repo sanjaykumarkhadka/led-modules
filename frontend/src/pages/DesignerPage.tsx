@@ -1,20 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore } from '../data/store';
 import { useProjectsStore } from '../state/projectsStore';
 import { MODULE_CATALOG } from '../data/catalog/modules';
-import { SUPPORTED_LANGUAGES } from '../data/languages';
 import { Button } from '../components/ui/Button';
 import { CanvasStage } from '../components/canvas/CanvasStage';
 import { ManualDesignerPage } from '../components/editor/ManualDesignerPage';
 import { generatePDFReport } from '../utils/pdfReport';
 import { InlineError } from '../components/ui/InlineError';
-import { Panel } from '../components/ui/Panel';
 import { Select } from '../components/ui/Select';
-import { Badge } from '../components/ui/Badge';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { useToast } from '../components/ui/ToastProvider';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { FieldRow } from '../components/ui/FieldRow';
+import { ToolRailButton } from '../components/ui/ToolRailButton';
 
 export function DesignerPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -23,6 +23,7 @@ export function DesignerPage() {
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState('filters');
 
   const {
     projects,
@@ -39,17 +40,14 @@ export function DesignerPage() {
     totalModules,
     totalPowerWatts,
     recommendedPSU,
+    selectedCharId,
     editorCharId,
-    addBlock,
     updateBlock,
-    removeBlock,
     setDepth,
     setModule,
-    triggerPopulation,
-    showDimensions,
-    toggleDimensions,
-    dimensionUnit,
-    setDimensionUnit,
+    openEditor,
+    setCharPlacementMode,
+    getCharPlacementMode,
   } = useProjectStore();
 
   const { notify } = useToast();
@@ -73,10 +71,16 @@ export function DesignerPage() {
   }, [projectId, openProject, projects, location.state]);
 
   const currentModule = MODULE_CATALOG.find((m) => m.id === selectedModuleId);
+  const selectedCharMode = selectedCharId ? getCharPlacementMode(selectedCharId) : 'auto';
 
+  const activeBlock = blocks[0];
   const handleGeneratePDF = async () => {
     if (!currentModule) {
-      notify({ variant: 'error', title: 'No module selected', description: 'Select an LED module before exporting PDF.' });
+      notify({
+        variant: 'error',
+        title: 'No module selected',
+        description: 'Select an LED module before exporting PDF.',
+      });
       return;
     }
 
@@ -102,158 +106,245 @@ export function DesignerPage() {
       return;
     }
     await saveCurrentProject(projectName, projectDescription);
-    notify({ variant: 'success', title: 'Project saved', description: projectName || 'Untitled project' });
+    notify({
+      variant: 'success',
+      title: 'Project saved',
+      description: projectName || 'Untitled project',
+    });
   };
 
+  const voltageOptions = useMemo(() => ['All', '12V', '24V'], []);
+
   return (
-    <div className="space-y-5">
-      <Panel className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs text-[var(--text-3)]">
-          <button type="button" onClick={() => navigate('/')} className="hover:text-[var(--text-1)]">
-            Projects
-          </button>
-          <span>/</span>
-          <span className="text-[var(--text-1)]">{projectName || 'Untitled project'}</span>
-          <Badge variant="accent">Designer</Badge>
+    <div className="space-y-4">
+      <header className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)]">
+        <div className="flex items-center justify-between px-4 py-4">
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="icon" onClick={() => navigate('/')}>
+              ⌂
+            </Button>
+            <span className="text-3xl font-semibold">Channel Letter</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="pill" className="px-8" onClick={handleGeneratePDF}>
+              PDF →
+            </Button>
+            <Button
+              variant="outline"
+              className="rounded-full px-7"
+              onClick={handleSaveProject}
+              disabled={projectsLoading}
+              loading={projectsLoading}
+            >
+              Save
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => setProjectDialogOpen(true)}>Project details</Button>
-          <Button onClick={handleSaveProject} disabled={projectsLoading} loading={projectsLoading}>Save</Button>
-          <Button variant="outline" onClick={handleGeneratePDF}>Export PDF</Button>
-        </div>
-      </Panel>
+      </header>
 
       {projectsError && <InlineError message={projectsError} />}
 
-      <main className="grid grid-cols-1 gap-5 xl:grid-cols-[330px_minmax(0,1fr)_300px]">
-        <Panel className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Configuration</h2>
-            <Button size="sm" variant="secondary" onClick={addBlock}>+ Add text</Button>
+      <main className="grid grid-cols-[76px_minmax(0,1fr)_510px] gap-3">
+        <aside className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-2">
+          <div className="flex flex-col items-center gap-2">
+            <ToolRailButton srLabel="Zoom In" icon={<span aria-hidden className="text-lg">⊕</span>} />
+            <ToolRailButton srLabel="Zoom Out" icon={<span aria-hidden className="text-lg">⊖</span>} />
           </div>
+        </aside>
 
-          <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">
-            {blocks.map((block, index) => (
-              <div key={block.id} className="rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-2)] p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)]">Line {index + 1}</p>
-                  <Button size="sm" variant="ghost" onClick={() => removeBlock(block.id)} disabled={blocks.length === 1}>Remove</Button>
-                </div>
-
-                <div className="space-y-2.5">
-                  <Input
-                    type="text"
-                    value={block.text}
-                    onChange={(e) => updateBlock(block.id, { text: e.target.value })}
-                    placeholder="ENTER TEXT"
-                  />
-                  <Select
-                    value={block.language}
-                    onChange={(e) => updateBlock(block.id, { language: e.target.value })}
-                    label="Language / Script"
-                  >
-                    {SUPPORTED_LANGUAGES.map((lang) => (
-                      <option key={lang.code} value={lang.code}>
-                        {lang.name} ({lang.nativeName})
-                      </option>
-                    ))}
-                  </Select>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="number"
-                      label="Height"
-                      value={block.fontSize}
-                      onChange={(e) => updateBlock(block.id, { fontSize: parseInt(e.target.value, 10) || 100 })}
-                    />
-                    <Input
-                      type="number"
-                      label="Y Position"
-                      value={block.y}
-                      onChange={(e) => updateBlock(block.id, { y: parseInt(e.target.value, 10) || 0 })}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <Button className="w-full" onClick={triggerPopulation}>Auto Populate LEDs</Button>
-
-          <Input
-            label="Can depth (inches)"
-            type="number"
-            value={depthInches}
-            step={0.5}
-            min={1}
-            max={12}
-            onChange={(e) => setDepth(parseFloat(e.target.value))}
-          />
-
-          <Select label="LED Module" value={selectedModuleId} onChange={(e) => setModule(e.target.value)}>
-            {MODULE_CATALOG.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} ({m.colorTemperature})
-              </option>
-            ))}
-          </Select>
-
-          {currentModule && (
-            <div className="rounded-[var(--radius-md)] border border-[var(--accent-700)] bg-[var(--accent-soft)] p-3 text-xs text-[var(--text-2)]">
-              <p className="font-semibold text-[var(--accent-300)]">{currentModule.name}</p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <span>Power: {currentModule.wattsPerModule}W</span>
-                <span>Lumens: {currentModule.lumensPerModule}</span>
-                <span>Spacing: {currentModule.installation.modulesPerFoot}/ft</span>
-                <span>Voltage: {currentModule.voltage}V</span>
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-2)] p-3">
-            <div className="flex items-center justify-between text-sm">
-              <span>Dimensions</span>
-              <button
-                type="button"
-                onClick={toggleDimensions}
-                className={`h-6 w-11 rounded-full border ${showDimensions ? 'border-[var(--accent-500)] bg-[var(--accent-500)]' : 'border-[var(--border-2)] bg-[var(--surface-3)]'}`}
-              >
-                <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${showDimensions ? 'translate-x-5' : 'translate-x-1'}`} />
-              </button>
-            </div>
-            {showDimensions && (
-              <div className="grid grid-cols-2 gap-2">
-                <Button size="sm" variant={dimensionUnit === 'mm' ? 'primary' : 'secondary'} onClick={() => setDimensionUnit('mm')}>
-                  mm
-                </Button>
-                <Button size="sm" variant={dimensionUnit === 'in' ? 'primary' : 'secondary'} onClick={() => setDimensionUnit('in')}>
-                  in
-                </Button>
-              </div>
-            )}
-          </div>
-        </Panel>
-
-        <Panel className="min-h-[700px] p-0 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-[var(--border-1)] bg-[var(--surface-2)] px-4 py-3 text-xs text-[var(--text-3)]">
-            <div className="flex items-center gap-2">
-              <Badge>{blocks.length} lines</Badge>
-              <Badge variant="accent">{totalModules} LEDs</Badge>
-            </div>
-            <span>Scale: 12.5px = 1&quot;</span>
-          </div>
-          <div className="h-[calc(100%-52px)] min-h-[648px]">
+        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-subtle)]">
+          <div className="h-[760px]">
             <CanvasStage />
           </div>
-        </Panel>
+        </section>
 
-        <Panel className="space-y-4">
-          <h2 className="text-sm font-semibold">Engineering Summary</h2>
-          <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-2)] p-4">
-            <div className="flex items-center justify-between text-sm"><span>Total Modules</span><strong>{totalModules}</strong></div>
-            <div className="flex items-center justify-between text-sm"><span>Total Power</span><strong>{totalPowerWatts.toFixed(1)} W</strong></div>
-            <div className="flex items-center justify-between text-sm"><span>Recommended PSU</span><strong>{recommendedPSU ? recommendedPSU.name : 'Calculating...'}</strong></div>
+        <aside className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
+          <div className="flex items-center justify-between">
+            <SegmentedControl
+              value={panelTab}
+              onChange={setPanelTab}
+              options={[
+                { label: 'Population Filters', value: 'filters' },
+                { label: 'Properties', value: 'props' },
+              ]}
+            />
+            <span className="text-2xl text-[var(--text-3)]">»</span>
           </div>
-        </Panel>
+
+          <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--surface-panel)] p-1">
+            <FieldRow
+              label="Selected Character"
+              control={
+                <Input
+                  value={selectedCharId ?? 'None selected'}
+                  readOnly
+                  className="h-11 bg-[var(--surface-strong)]"
+                />
+              }
+            />
+            <FieldRow
+              label="Placement"
+              control={
+                <SegmentedControl
+                  value={selectedCharMode}
+                  onChange={(value) => {
+                    if (!selectedCharId) return;
+                    setCharPlacementMode(selectedCharId, value as 'auto' | 'manual');
+                  }}
+                  options={[
+                    { label: 'Auto', value: 'auto' },
+                    { label: 'Manual', value: 'manual' },
+                  ]}
+                  className="w-full justify-center"
+                />
+              }
+            />
+            <FieldRow
+              label="Manual Edit"
+              control={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-center"
+                  disabled={!selectedCharId}
+                  onClick={() => {
+                    if (!selectedCharId) return;
+                    setCharPlacementMode(selectedCharId, 'manual');
+                    openEditor(selectedCharId);
+                  }}
+                >
+                  Open editor
+                </Button>
+              }
+            />
+            <FieldRow
+              label="Your Text"
+              control={
+                <Input
+                  value={activeBlock?.text ?? ''}
+                  onChange={(e) => {
+                    if (!activeBlock) return;
+                    updateBlock(activeBlock.id, { text: e.target.value });
+                  }}
+                  className="h-11 bg-[var(--surface-strong)]"
+                />
+              }
+            />
+            <FieldRow
+              label="Layout Type"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>Face Lit</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Font"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>72 - Black - 7</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Depth"
+              control={
+                <Input
+                  type="number"
+                  value={depthInches}
+                  step={0.5}
+                  min={1}
+                  max={12}
+                  onChange={(e) => setDepth(parseFloat(e.target.value) || 1)}
+                  className="h-11 bg-[var(--surface-subtle)]"
+                />
+              }
+            />
+            <FieldRow
+              label="Height"
+              control={
+                <Input
+                  type="number"
+                  value={activeBlock?.fontSize ?? 24}
+                  onChange={(e) => {
+                    if (!activeBlock) return;
+                    updateBlock(activeBlock.id, { fontSize: parseInt(e.target.value, 10) || 24 });
+                  }}
+                  className="h-11 bg-[var(--surface-subtle)]"
+                />
+              }
+            />
+            <FieldRow
+              label="Voltage"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  {voltageOptions.map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Power Supply"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>{recommendedPSU?.name ?? 'GEPS24LT-100U-NA'}</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Power Supply Mode"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>Simple Optimal</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Series"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>All</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Color"
+              control={
+                <Select className="h-11 bg-[var(--surface-subtle)]">
+                  <option>All</option>
+                </Select>
+              }
+            />
+            <FieldRow
+              label="Module"
+              control={
+                <Select
+                  className="h-11 bg-[var(--surface-subtle)]"
+                  value={selectedModuleId}
+                  onChange={(e) => setModule(e.target.value)}
+                >
+                  {MODULE_CATALOG.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </Select>
+              }
+            />
+          </div>
+
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-elevated)] p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span>Total Modules</span>
+              <strong>{totalModules}</strong>
+            </div>
+            <div className="mt-1 flex items-center justify-between">
+              <span>Total Power</span>
+              <strong>{totalPowerWatts.toFixed(1)} W</strong>
+            </div>
+          </div>
+        </aside>
       </main>
 
       <Modal
@@ -276,7 +367,9 @@ export function DesignerPage() {
             onChange={(e) => setProjectDescription(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setProjectDialogOpen(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setProjectDialogOpen(false)}>
+              Cancel
+            </Button>
             <Button
               onClick={async () => {
                 if (!projectName.trim()) return;

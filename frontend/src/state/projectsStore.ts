@@ -33,8 +33,10 @@ interface ProjectsState {
   errorMessage: string | null;
 
   loadProjects: () => Promise<void>;
+  createProjectEntry: (name: string, description?: string) => Promise<void>;
   openProject: (id: string) => Promise<void>;
   saveCurrentProject: (name: string, description?: string) => Promise<void>;
+  renameProjectById: (id: string, name: string) => Promise<void>;
   deleteProjectById: (id: string) => Promise<void>;
 }
 
@@ -97,6 +99,35 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       set({
         loading: false,
         errorMessage: toErrorMessage(err, 'Failed to load projects'),
+      });
+    }
+  },
+
+  async createProjectEntry(name: string, description?: string) {
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      set({ errorMessage: 'You must be logged in to create projects.' });
+      return;
+    }
+    set({ loading: true, errorMessage: null });
+    try {
+      const data = serializeDesign();
+      const payload = {
+        name,
+        description,
+        data: data as unknown as Record<string, unknown>,
+      };
+      await createProject(accessToken, payload);
+      const projects = await listProjects(accessToken);
+      set({
+        projects,
+        loading: false,
+        currentProjectId: null,
+      });
+    } catch (err: unknown) {
+      set({
+        loading: false,
+        errorMessage: toErrorMessage(err, 'Failed to create project'),
       });
     }
   },
@@ -180,6 +211,34 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       set({
         loading: false,
         errorMessage: toErrorMessage(err, 'Failed to delete project'),
+      });
+    }
+  },
+
+  async renameProjectById(id: string, name: string) {
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      set({ errorMessage: 'You must be logged in to rename projects.' });
+      return;
+    }
+    set({ loading: true, errorMessage: null });
+    try {
+      const existing = get().projects.find((p) => p._id === id);
+      const project = existing ?? (await getProject(accessToken, id));
+      await updateProject(accessToken, id, {
+        name,
+        description: project.description,
+        data: project.data ?? {},
+      });
+      const projects = await listProjects(accessToken);
+      set({
+        projects,
+        loading: false,
+      });
+    } catch (err: unknown) {
+      set({
+        loading: false,
+        errorMessage: toErrorMessage(err, 'Failed to rename project'),
       });
     }
   },

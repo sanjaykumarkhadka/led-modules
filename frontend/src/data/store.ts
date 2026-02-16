@@ -197,12 +197,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setCharLedCount: (charId, count) =>
     set((state) => ({
-      ledCountOverrides: { ...state.ledCountOverrides, [charId]: count },
+      ledCountOverrides: { ...(state.ledCountOverrides ?? {}), [charId]: count },
     })),
 
   resetCharLedCount: (charId) =>
     set((state) => {
-      const { [charId]: _removed, ...rest } = state.ledCountOverrides;
+      const source = state.ledCountOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
       void _removed; // Intentionally unused - we're removing this key
       return { ledCountOverrides: rest };
     }),
@@ -211,80 +212,86 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   getCharLedCount: (charId) => {
     const state = get();
-    return state.ledCountOverrides[charId] ?? state.defaultLedCount;
+    return state.ledCountOverrides?.[charId] ?? state.defaultLedCount;
   },
 
   // Column count actions
   setCharLedColumns: (charId, columns) =>
     set((state) => ({
-      ledColumnOverrides: { ...state.ledColumnOverrides, [charId]: columns },
+      ledColumnOverrides: { ...(state.ledColumnOverrides ?? {}), [charId]: columns },
     })),
 
   resetCharLedColumns: (charId) =>
     set((state) => {
-      const { [charId]: _removed, ...rest } = state.ledColumnOverrides;
+      const source = state.ledColumnOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
       void _removed; // Intentionally unused - we're removing this key
       return { ledColumnOverrides: rest };
     }),
 
   getCharLedColumns: (charId) => {
     const state = get();
-    return state.ledColumnOverrides[charId] ?? state.defaultLedColumns;
+    return state.ledColumnOverrides?.[charId] ?? state.defaultLedColumns;
   },
 
   // Orientation actions
   setCharLedOrientation: (charId, orientation) =>
     set((state) => ({
-      ledOrientationOverrides: { ...state.ledOrientationOverrides, [charId]: orientation },
+      ledOrientationOverrides: {
+        ...(state.ledOrientationOverrides ?? {}),
+        [charId]: orientation,
+      },
     })),
 
   resetCharLedOrientation: (charId) =>
     set((state) => {
-      const { [charId]: _removed, ...rest } = state.ledOrientationOverrides;
+      const source = state.ledOrientationOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
       void _removed; // Intentionally unused - we're removing this key
       return { ledOrientationOverrides: rest };
     }),
 
   getCharLedOrientation: (charId) => {
     const state = get();
-    return state.ledOrientationOverrides[charId] ?? state.defaultLedOrientation;
+    return state.ledOrientationOverrides?.[charId] ?? state.defaultLedOrientation;
   },
 
   setCharPlacementMode: (charId, mode) =>
     set((state) => ({
-      placementModeOverrides: { ...state.placementModeOverrides, [charId]: mode },
+      placementModeOverrides: { ...(state.placementModeOverrides ?? {}), [charId]: mode },
     })),
 
   resetCharPlacementMode: (charId) =>
     set((state) => {
-      const { [charId]: _removed, ...rest } = state.placementModeOverrides;
+      const source = state.placementModeOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
       void _removed;
       return { placementModeOverrides: rest };
     }),
 
   getCharPlacementMode: (charId) => {
     const state = get();
-    return state.placementModeOverrides[charId] ?? state.defaultPlacementMode;
+    return state.placementModeOverrides?.[charId] ?? state.defaultPlacementMode;
   },
 
   setCharManualLeds: (charId, leds) =>
     set((state) => ({
-      manualLedOverrides: { ...state.manualLedOverrides, [charId]: leds },
+      manualLedOverrides: { ...(state.manualLedOverrides ?? {}), [charId]: leds },
     })),
 
   addCharManualLed: (charId, led) =>
     set((state) => ({
       manualLedOverrides: {
-        ...state.manualLedOverrides,
-        [charId]: [...(state.manualLedOverrides[charId] || []), led],
+        ...(state.manualLedOverrides ?? {}),
+        [charId]: [...(state.manualLedOverrides?.[charId] || []), led],
       },
     })),
 
   updateCharManualLed: (charId, ledId, updates) =>
     set((state) => ({
       manualLedOverrides: {
-        ...state.manualLedOverrides,
-        [charId]: (state.manualLedOverrides[charId] || []).map((led) =>
+        ...(state.manualLedOverrides ?? {}),
+        [charId]: (state.manualLedOverrides?.[charId] || []).map((led) =>
           led.id === ledId ? { ...led, ...updates } : led
         ),
       },
@@ -293,21 +300,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeCharManualLed: (charId, ledId) =>
     set((state) => ({
       manualLedOverrides: {
-        ...state.manualLedOverrides,
-        [charId]: (state.manualLedOverrides[charId] || []).filter((led) => led.id !== ledId),
+        ...(state.manualLedOverrides ?? {}),
+        [charId]: (state.manualLedOverrides?.[charId] || []).filter((led) => led.id !== ledId),
       },
     })),
 
   clearCharManualLeds: (charId) =>
     set((state) => {
-      const { [charId]: _removed, ...rest } = state.manualLedOverrides;
+      const source = state.manualLedOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
       void _removed;
       return { manualLedOverrides: rest };
     }),
 
   getCharManualLeds: (charId) => {
     const state = get();
-    return state.manualLedOverrides[charId] || [];
+    return state.manualLedOverrides?.[charId] || [];
   },
 
   setComputedLayoutData: (data) => set({ computedLayoutData: data }),

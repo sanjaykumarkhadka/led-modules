@@ -7,12 +7,14 @@ import { AppLayout } from './components/layout/AppLayout';
 import { ProjectsOverviewPage } from './pages/ProjectsOverviewPage';
 import { DesignerPage } from './pages/DesignerPage';
 import { useAuthStore } from './state/authStore';
+import { ThemeToggleButton } from './components/ui/ThemeToggleButton';
 
 function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  const { user, status: authStatus, errorMessage: authError, login, logout, bootstrap } = useAuthStore();
+  const { user, status: authStatus, errorMessage: authError, login, logout, bootstrap } =
+    useAuthStore();
 
   useEffect(() => {
     void bootstrap();
@@ -38,52 +40,75 @@ function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen px-4 py-8 md:px-8">
-        <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-8 md:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-1)] p-7 shadow-[var(--shadow-md)]">
-            <p className="text-xs uppercase tracking-[0.12em] text-[var(--accent-300)]">Qwatt Production Suite</p>
-            <h1 className="mt-3 text-4xl font-semibold leading-tight">Professional LED layout engineering, rebuilt for production teams.</h1>
-            <p className="mt-3 max-w-xl text-sm text-[var(--text-3)]">
-              Build accurate channel-letter designs, validate module population, and export engineering-ready plans with consistent quality control.
-            </p>
-            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Card title="Layout" description="High-fidelity character-level LED planning." />
-              <Card title="Power" description="Instant module count and PSU recommendations." />
-              <Card title="Export" description="Technical PDF output for handoff and archive." />
+      <div className="min-h-screen px-6 py-8 lg:px-10">
+        <div className="mx-auto max-w-[1580px]">
+          <div className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--accent-soft)] text-sm font-semibold text-[var(--accent-600)]">
+                L
+              </div>
+              <span className="text-3xl font-medium text-[var(--text-1)]">Led-modules</span>
             </div>
-          </section>
+            <ThemeToggleButton />
+          </div>
 
-          <Card title="Sign in" description="Access your project workspace and continue where you left off.">
-            <form onSubmit={handleAuthSubmit} className="space-y-4">
-              <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-              <Input
-                label="Password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                error={authError || undefined}
-              />
-              <Button type="submit" className="w-full justify-center">
-                Sign in to workspace
-              </Button>
-            </form>
-          </Card>
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-[1.35fr_0.9fr]">
+            <section className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-canvas)] p-8 shadow-[var(--shadow-md)]">
+              <h1 className="text-4xl font-semibold leading-tight text-[var(--text-1)]">
+                Professional LED signage planning, organized like modern cloud workspace software.
+              </h1>
+              <p className="mt-4 max-w-2xl text-base text-[var(--text-3)]">
+                Build channel-letter layouts, validate module placement, and export production-ready documentation from a single clean interface.
+              </p>
+              <div className="mt-8 grid gap-4 sm:grid-cols-3">
+                <Card
+                  title="Organized Projects"
+                  description="Keep every job in one workspace."
+                  className="bg-[var(--surface-panel)]"
+                />
+                <Card
+                  title="Signage Editor"
+                  description="Character-level LED placement controls."
+                  className="bg-[var(--surface-panel)]"
+                />
+                <Card
+                  title="Engineering Output"
+                  description="Power and BOM insights with PDF export."
+                  className="bg-[var(--surface-panel)]"
+                />
+              </div>
+            </section>
+
+            <Card title="Sign in" description="Access your project workspace.">
+              <form onSubmit={handleAuthSubmit} className="space-y-4">
+                <Input
+                  label="Email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+                <Input
+                  label="Password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  error={authError || undefined}
+                />
+                <Button type="submit" className="w-full justify-center">
+                  Sign in
+                </Button>
+              </form>
+            </Card>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <AppLayout
-      userDisplayName={user.displayName || user.email}
-      onLogout={logout}
-      headerActions={
-        <Button variant="secondary" size="sm" onClick={() => window.print()}>
-          Print Preview
-        </Button>
-      }
-    >
+    <AppLayout userDisplayName={user.displayName || user.email} onLogout={logout}>
       <Routes>
         <Route path="/" element={<ProjectsOverviewPage />} />
         <Route path="/projects/:projectId" element={<DesignerPage />} />

@@ -74,20 +74,20 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
         <path
           d={charPath.pathData}
           fill="none"
-          stroke="#3b82f6"
+          stroke="#111827"
           strokeWidth="6"
           strokeDasharray="8 4"
-          opacity={0.8}
+          opacity={0.55}
           style={{ pointerEvents: 'none' }}
         />
       )}
 
-      {/* Main letter fill with metallic gradient */}
+      {/* Main letter fill: monochrome black/white */}
       <path
         ref={pathElementRef}
         d={charPath.pathData}
-        fill="url(#metallic)"
-        stroke={isSelected ? '#3b82f6' : '#94a3b8'}
+        fill="#ffffff"
+        stroke={isSelected ? '#111827' : '#334155'}
         strokeWidth={isSelected ? 3 : 2}
         filter="url(#letterShadow)"
         className="transition-all duration-150"
@@ -97,7 +97,7 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
       <path
         d={charPath.pathData}
         fill="none"
-        stroke="rgba(255,255,255,0.3)"
+        stroke="rgba(15,23,42,0.2)"
         strokeWidth="1"
         style={{ pointerEvents: 'none' }}
       />
@@ -105,10 +105,10 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
       {/* Hover highlight */}
       <path
         d={charPath.pathData}
-        fill="rgba(59, 130, 246, 0)"
+        fill="rgba(15, 23, 42, 0)"
         stroke="transparent"
         strokeWidth="4"
-        className="hover:fill-[rgba(59,130,246,0.1)] transition-all duration-150"
+        className="hover:fill-[rgba(15,23,42,0.05)] transition-all duration-150"
       />
     </g>
   );
