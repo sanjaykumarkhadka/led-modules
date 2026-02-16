@@ -2,15 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --surface-0: #070c12;
+  --surface-1: #0e1620;
+  --surface-2: #14202b;
+  --surface-3: #1b2b39;
+  --text-1: #e6edf6;
+  --text-2: #c1cfdd;
+  --text-3: #8ca0b5;
+  --text-4: #6b7f93;
+  --border-1: #223242;
+  --border-2: #2f475e;
+  --accent-200: #b7f1ff;
+  --accent-300: #7fe7ff;
+  --accent-400: #33d3f5;
+  --accent-500: #1eaac9;
+  --accent-700: #1a5b6a;
+  --accent-soft: rgba(30, 170, 201, 0.14);
+  --danger-200: #ffd0cc;
+  --danger-300: #ff9d96;
+  --danger-400: #f87067;
+  --danger-500: #d9544c;
+  --danger-700: #6b2b28;
+  --danger-soft: rgba(217, 84, 76, 0.15);
+  --success-200: #c8f7de;
+  --success-300: #8cecbc;
+  --success-400: #4fd892;
+  --success-500: #2ba56b;
+  --success-700: #1f5e44;
+  --success-soft: rgba(43, 165, 107, 0.15);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 8px 20px rgba(2, 8, 14, 0.26);
+  --shadow-md: 0 16px 35px rgba(2, 8, 14, 0.38);
+  --shadow-lg: 0 30px 60px rgba(0, 0, 0, 0.45);
+  --z-dialog: 70;
+  --z-toast: 90;
+}
+
 html,
 body,
 #root {
   height: 100%;
 }
 
-html,
 body {
-  background-color: #020617; /* tailwind slate-950 */
-  color: #e5e7eb; /* tailwind slate-200 */
+  margin: 0;
+  background:
+    radial-gradient(circle at 15% 5%, rgba(51, 211, 245, 0.12), transparent 28%),
+    radial-gradient(circle at 88% 8%, rgba(84, 152, 217, 0.14), transparent 24%),
+    linear-gradient(180deg, #060a10 0%, #0a1119 100%);
+  color: var(--text-1);
+  font-family: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
   overscroll-behavior: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+*::selection {
+  background: rgba(51, 211, 245, 0.28);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

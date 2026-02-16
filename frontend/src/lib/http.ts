@@ -12,6 +12,14 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+function getErrorMessage(data: unknown, status: number) {
+  if (typeof data === 'object' && data !== null && 'message' in data) {
+    const message = (data as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return `Request failed with status ${status}`;
+}
+
 export async function http<TResponse>(
   path: string,
   options: RequestOptions = {},
@@ -39,10 +47,7 @@ export async function http<TResponse>(
 
   if (!response.ok) {
     const error: HttpError = Object.assign(
-      new Error(
-        (data as any)?.message ??
-          `Request failed with status ${response.status}`,
-      ),
+      new Error(getErrorMessage(data, response.status)),
       {
         status: response.status,
         details: data,
@@ -53,4 +58,3 @@ export async function http<TResponse>(
 
   return data as TResponse;
 }
-

@@ -1,62 +1,93 @@
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { Button } from './Button';
 
-type ToastType = 'success' | 'error' | 'info';
+type ToastVariant = 'success' | 'error' | 'info';
 
-interface Toast {
+interface NotifyPayload {
+  variant: ToastVariant;
+  title: string;
+  description?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
+interface ToastItem extends NotifyPayload {
   id: number;
-  type: ToastType;
-  message: string;
 }
 
 interface ToastContextValue {
-  showToast: (type: ToastType, message: string) => void;
+  notify: (payload: NotifyPayload) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast() {
   const ctx = useContext(ToastContext);
   if (!ctx) throw new Error('useToast must be used within ToastProvider');
   return ctx;
 }
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+const variantStyle: Record<ToastVariant, string> = {
+  success: 'border-[var(--success-700)] bg-[var(--success-soft)] text-[var(--success-200)]',
+  error: 'border-[var(--danger-700)] bg-[var(--danger-soft)] text-[var(--danger-200)]',
+  info: 'border-[var(--accent-700)] bg-[var(--accent-soft)] text-[var(--accent-200)]',
+};
 
-  const showToast = useCallback((type: ToastType, message: string) => {
-    setToasts((prev) => {
-      const next: Toast = {
-        id: Date.now(),
-        type,
-        message,
-      };
-      return [...prev, next];
-    });
+export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const notify = useCallback((payload: NotifyPayload) => {
+    const id = Date.now() + Math.round(Math.random() * 1000);
+    setToasts((prev) => [...prev, { ...payload, id }]);
     setTimeout(() => {
-      setToasts((prev) => prev.slice(1));
-    }, 3500);
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4500);
   }, []);
 
+  const value = useMemo(() => ({ notify }), [notify]);
+
   return (
-    <ToastContext.Provider value={{ showToast }}>
+    <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+      <div className="pointer-events-none fixed bottom-4 right-4 z-[var(--z-toast)] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col gap-2">
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`min-w-[220px] max-w-xs rounded-xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${
-              toast.type === 'success'
-                ? 'bg-emerald-500/15 border-emerald-500/60 text-emerald-100'
-                : toast.type === 'error'
-                  ? 'bg-red-500/15 border-red-500/60 text-red-100'
-                  : 'bg-slate-700/80 border-slate-500/60 text-slate-100'
-            }`}
+            className={`pointer-events-auto rounded-[var(--radius-md)] border p-3 shadow-[var(--shadow-md)] ${variantStyle[toast.variant]}`}
+            role="status"
           >
-            {toast.message}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">{toast.title}</p>
+                {toast.description && <p className="mt-1 text-xs opacity-90">{toast.description}</p>}
+              </div>
+              <button
+                type="button"
+                className="text-xs opacity-80 hover:opacity-100"
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              >
+                Dismiss
+              </button>
+            </div>
+            {toast.actionLabel && toast.onAction && (
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    toast.onAction?.();
+                    setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+                  }}
+                >
+                  {toast.actionLabel}
+                </Button>
+              </div>
+            )}
           </div>
         ))}
       </div>
     </ToastContext.Provider>
   );
 };
-

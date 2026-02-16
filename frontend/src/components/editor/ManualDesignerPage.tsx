@@ -8,6 +8,9 @@ import {
 } from '../../core/math/characterPaths';
 import type { ManualLED } from '../../data/store';
 import { isCapsuleInside, isPointInside } from '../../core/math/geometry';
+import { useToast } from '../ui/ToastProvider';
+import { useConfirm } from '../ui/ConfirmProvider';
+import { InlineError } from '../ui/InlineError';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
@@ -63,6 +66,8 @@ export const ManualDesignerPage: React.FC = () => {
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
   const setCharManualLeds = useProjectStore((state) => state.setCharManualLeds);
   const currentModule = useProjectStore((state) => state.getCurrentModule());
+  const { notify } = useToast();
+  const { confirm } = useConfirm();
 
   const [snapEnabled] = useState(false);
   const [gridSize] = useState(2);
@@ -82,8 +87,11 @@ export const ManualDesignerPage: React.FC = () => {
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const [groupLayoutMode, setGroupLayoutMode] = useState<'line' | 'grid' | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
-  selectedLedIdsRef.current = selectedLedIds;
+  useEffect(() => {
+    selectedLedIdsRef.current = selectedLedIds;
+  }, [selectedLedIds]);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
@@ -188,7 +196,7 @@ export const ManualDesignerPage: React.FC = () => {
       setIsDirty(false);
       setInvalidLedIds(new Set());
     });
-  }, [editorCharId, getCharManualLeds]);
+  }, [clearSelection, editorCharId, getCharManualLeds]);
 
   useLayoutEffect(() => {
     if (!pathRef.current) return;
@@ -708,7 +716,7 @@ export const ManualDesignerPage: React.FC = () => {
       }
       setIsDirty(true);
     },
-    [absoluteLeds, getSvgPoint, toManual, toManualUnclamped]
+    [absoluteLeds, getSvgPoint, toManualUnclamped]
   );
 
   const handleRotationHandlePointerUp = useCallback((event: React.PointerEvent<SVGElement>) => {
@@ -968,10 +976,12 @@ export const ManualDesignerPage: React.FC = () => {
     const selected = draftLeds.filter((l) => selectedLedIds.has(l.id));
     if (selected.length === 0) return;
     const avgScale = selected.reduce((sum, l) => sum + (l.scale ?? 1), 0) / selected.length;
-    setGroupScale(avgScale);
     const avgRotation = selected.reduce((sum, l) => sum + l.rotation, 0) / selected.length;
-    setGroupAngle(((avgRotation % 360) + 360) % 360);
-  }, [selectedLedIds]);
+    queueMicrotask(() => {
+      setGroupScale(avgScale);
+      setGroupAngle(((avgRotation % 360) + 360) % 360);
+    });
+  }, [selectedLedIds, draftLeds]);
 
   const GROUP_SPACING_MIN = 0;
   const GROUP_SPACING_MAX = 20;
@@ -1137,11 +1147,12 @@ export const ManualDesignerPage: React.FC = () => {
     setGroupLayoutMode('grid');
   }, [arrangeGrid]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!editorCharId) return;
     if (!localBounds) {
       setCharManualLeds(editorCharId, draftLeds);
       setCharPlacementMode(editorCharId, 'manual');
+      notify({ variant: 'success', title: 'Manual layout saved' });
       closeEditor();
       return;
     }
@@ -1171,19 +1182,38 @@ export const ManualDesignerPage: React.FC = () => {
 
     if (failedIds.size > 0) {
       setInvalidLedIds(failedIds);
-      alert(
-        `Cannot save: ${failedIds.size} module(s) are outside the character.\n\nThey are highlighted in red. Move them inside the letter outline, or click a red module to clear the highlight.`
+      setSaveError(
+        `${failedIds.size} module(s) are outside the character. Move highlighted modules inside the outline before saving.`
       );
+      notify({
+        variant: 'error',
+        title: 'Cannot save manual layout',
+        description: 'One or more modules are outside the character.',
+      });
       return;
     }
-    const confirmed = window.confirm(
-      'Save your changes? This will keep this character in manual placement mode.'
-    );
+    setSaveError(null);
+    const confirmed = await confirm({
+      title: 'Save manual placement?',
+      description: 'This character will remain in manual placement mode.',
+      confirmText: 'Save changes',
+      cancelText: 'Continue editing',
+    });
     if (!confirmed) return;
     setCharManualLeds(editorCharId, draftLeds);
     setCharPlacementMode(editorCharId, 'manual');
+    notify({ variant: 'success', title: 'Manual layout saved' });
     closeEditor();
-  }, [closeEditor, draftLeds, editorCharId, localBounds, setCharManualLeds, setCharPlacementMode]);
+  }, [
+    closeEditor,
+    confirm,
+    draftLeds,
+    editorCharId,
+    localBounds,
+    notify,
+    setCharManualLeds,
+    setCharPlacementMode,
+  ]);
 
   const handleCancel = useCallback(() => {
     closeEditor();
@@ -1229,13 +1259,20 @@ export const ManualDesignerPage: React.FC = () => {
                 Back
               </button>
               <button
-                onClick={handleSave}
+                onClick={() => {
+                  void handleSave();
+                }}
                 className="px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold"
               >
                 Save Changes
               </button>
             </div>
           </div>
+          {saveError && (
+            <div className="px-6 pt-4">
+              <InlineError message={saveError} />
+            </div>
+          )}
 
           <div className="flex-1 grid grid-cols-[1fr_320px] min-h-0">
             <div
@@ -1707,13 +1744,16 @@ export const ManualDesignerPage: React.FC = () => {
                     <span className="text-white font-semibold">{draftLeds.length}</span>
                   </div>
                   <button
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          'Remove all LED modules from this character? This cannot be undone.'
-                        )
-                      ) {
+                    onClick={async () => {
+                      const shouldClear = await confirm({
+                        title: 'Clear all modules?',
+                        description: 'This removes all manual modules for this character.',
+                        confirmText: 'Clear all',
+                        variant: 'danger',
+                      });
+                      if (shouldClear) {
                         handleClearAll();
+                        notify({ variant: 'info', title: 'Modules cleared' });
                       }
                     }}
                     className="w-full px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium"

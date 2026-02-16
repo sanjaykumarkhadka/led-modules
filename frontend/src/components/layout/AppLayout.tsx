@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 
 interface AppLayoutProps {
@@ -8,51 +9,34 @@ interface AppLayoutProps {
   children: ReactNode;
 }
 
-export function AppLayout({
-  userDisplayName,
-  onLogout,
-  headerActions,
-  children,
-}: AppLayoutProps) {
+export function AppLayout({ userDisplayName, onLogout, headerActions, children }: AppLayoutProps) {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      <header className="border-b border-slate-800 bg-slate-950/70 backdrop-blur-sm">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-transparent text-[var(--text-1)]">
+      <header className="sticky top-0 z-40 border-b border-[var(--border-1)] bg-[rgba(6,12,18,0.82)] backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[1460px] items-center justify-between gap-4 px-4 py-3 md:px-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/25">
-              <span className="text-sm font-bold tracking-tight">QW</span>
+            <div className="grid h-10 w-10 place-items-center rounded-[var(--radius-md)] border border-[var(--accent-700)] bg-[var(--accent-soft)] text-sm font-bold tracking-wider text-[var(--accent-300)]">
+              QW
             </div>
             <div>
-              <div className="text-sm font-semibold tracking-tight">Qwatt LED Studio</div>
-              <div className="text-xs text-slate-400">
-                Professional channel letter layout & power planning
-              </div>
+              <p className="text-sm font-semibold">Qwatt Studio</p>
+              <p className="text-xs text-[var(--text-3)]">LED channel-letter engineering workspace</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+
+          <div className="flex items-center gap-2 md:gap-3">
             {headerActions}
-            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-              <span className="hidden sm:inline">Signed in as</span>
-              <span className="px-2 py-1 rounded-full bg-slate-900/80 text-slate-100 border border-slate-700/80">
-                {userDisplayName}
-              </span>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onLogout}
-              className="text-xs px-3 py-1.5"
-            >
+            <Badge>{userDisplayName}</Badge>
+            <Button variant="outline" size="sm" onClick={onLogout}>
               Log out
             </Button>
           </div>
         </div>
       </header>
 
-      <main className="flex-1">
-        <div className="max-w-6xl mx-auto px-4 py-6">{children}</div>
+      <main>
+        <div className="mx-auto w-full max-w-[1460px] px-4 py-6 md:px-6 md:py-7">{children}</div>
       </main>
     </div>
   );
 }
-
