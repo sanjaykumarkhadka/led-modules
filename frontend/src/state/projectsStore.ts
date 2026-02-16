@@ -34,7 +34,8 @@ interface ProjectsState {
 
   loadProjects: () => Promise<void>;
   openProject: (id: string) => Promise<void>;
-  saveCurrentProject: (name: string) => Promise<void>;
+  saveCurrentProject: (name: string, description?: string) => Promise<void>;
+  deleteProjectById: (id: string) => Promise<void>;
 }
 
 function serializeDesign(): DesignData {
@@ -115,7 +116,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
   },
 
-  async saveCurrentProject(name: string) {
+  async saveCurrentProject(name: string, description?: string) {
     const accessToken = useAuthStore.getState().accessToken;
     if (!accessToken) {
       set({ errorMessage: 'You must be logged in to save projects.' });
@@ -126,7 +127,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       const data = serializeDesign();
       const payload = {
         name,
-        description: '',
+        description,
         data: data as unknown as Record<string, unknown>,
       };
       const currentId = get().currentProjectId;
@@ -147,6 +148,30 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       set({
         loading: false,
         errorMessage: err?.message ?? 'Failed to save project',
+      });
+    }
+  },
+
+  async deleteProjectById(id: string) {
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      set({ errorMessage: 'You must be logged in to delete projects.' });
+      return;
+    }
+    set({ loading: true, errorMessage: null });
+    try {
+      const { deleteProject } = await import('../api/projects');
+      await deleteProject(accessToken, id);
+      const projects = await listProjects(accessToken);
+      set({
+        projects,
+        loading: false,
+        currentProjectId: get().currentProjectId === id ? null : get().currentProjectId,
+      });
+    } catch (err: any) {
+      set({
+        loading: false,
+        errorMessage: err?.message ?? 'Failed to delete project',
       });
     }
   },
