@@ -972,16 +972,26 @@ export const ManualDesignerPage: React.FC = () => {
     return width >= height ? 'horizontal' : 'vertical';
   }, [alignBounds, selectedAbsoluteLeds]);
 
+  const effectiveGroupAxis = useMemo<GroupAxis | null>(() => {
+    if (selectedAbsoluteLeds.length < 2) return null;
+    if (Number.isFinite(groupAngle)) {
+      const rad = (groupAngle * Math.PI) / 180;
+      const horizontal = Math.abs(Math.cos(rad)) >= Math.abs(Math.sin(rad));
+      return horizontal ? 'horizontal' : 'vertical';
+    }
+    return inferredGroupAxis;
+  }, [groupAngle, inferredGroupAxis, selectedAbsoluteLeds]);
+
   const orderedSelectedAbsoluteLeds = useMemo(() => {
-    if (!inferredGroupAxis) return [];
+    if (!effectiveGroupAxis) return [];
     const sorted = [...selectedAbsoluteLeds];
-    if (inferredGroupAxis === 'horizontal') {
+    if (effectiveGroupAxis === 'horizontal') {
       sorted.sort((a, b) => a.x - b.x);
     } else {
       sorted.sort((a, b) => a.y - b.y);
     }
     return sorted;
-  }, [selectedAbsoluteLeds, inferredGroupAxis]);
+  }, [selectedAbsoluteLeds, effectiveGroupAxis]);
 
   const averageSelectedSize = useMemo(() => {
     if (selectedAbsoluteLeds.length === 0) return 0;
@@ -994,7 +1004,7 @@ export const ManualDesignerPage: React.FC = () => {
       if (
         !localBounds ||
         !alignBounds ||
-        !inferredGroupAxis ||
+        !effectiveGroupAxis ||
         orderedSelectedAbsoluteLeds.length < 2
       ) {
         return [] as { x: number; y: number; direction: 'start' | 'end' }[];
@@ -1010,7 +1020,7 @@ export const ManualDesignerPage: React.FC = () => {
         orderedSelectedAbsoluteLeds.reduce((sum, led) => sum + led.h, 0) /
         orderedSelectedAbsoluteLeds.length;
 
-      const baseSpacing = groupSpacing > 0 ? groupSpacing : inferredGroupAxis === 'horizontal'
+      const baseSpacing = groupSpacing > 0 ? groupSpacing : effectiveGroupAxis === 'horizontal'
           ? avgW * 0.6
           : avgH * 0.6;
 
@@ -1020,7 +1030,7 @@ export const ManualDesignerPage: React.FC = () => {
 
       const handles: { x: number; y: number; direction: 'start' | 'end' }[] = [];
 
-      if (inferredGroupAxis === 'horizontal') {
+      if (effectiveGroupAxis === 'horizontal') {
         const gap = baseSpacing + avgW;
         const startX = first.x - gap;
         const endX = last.x + gap;
@@ -1038,7 +1048,7 @@ export const ManualDesignerPage: React.FC = () => {
 
       return handles;
     },
-    [alignBounds, inferredGroupAxis, orderedSelectedAbsoluteLeds, localBounds, groupSpacing]
+    [alignBounds, effectiveGroupAxis, orderedSelectedAbsoluteLeds, localBounds, groupSpacing]
   );
 
   /** Sync group scale and angle from selection when selection changes */
@@ -1218,86 +1228,58 @@ export const ManualDesignerPage: React.FC = () => {
 
   const handleExtendGroup = useCallback(
     (direction: 'start' | 'end') => {
-      if (!localBounds || selectedLedIds.size === 0) return;
+      if (!localBounds || selectedAbsoluteLeds.length === 0) return;
 
-      const axis: GroupAxis = inferredGroupAxis ?? 'horizontal';
-      const selectedIds = Array.from(selectedLedIds);
+      const axis: GroupAxis = effectiveGroupAxis ?? 'horizontal';
+      const ordered = [...selectedAbsoluteLeds];
+      if (axis === 'horizontal') {
+        ordered.sort((a, b) => a.x - b.x);
+      } else {
+        ordered.sort((a, b) => a.y - b.y);
+      }
+      const seed = direction === 'end' ? ordered[ordered.length - 1] : ordered[0];
+
+      const avgW =
+        ordered.reduce((sum, led) => sum + led.w, 0) / ordered.length || BASE_LED_WIDTH;
+      const avgH =
+        ordered.reduce((sum, led) => sum + led.h, 0) / ordered.length || BASE_LED_HEIGHT;
+
+      const baseSpacing =
+        groupSpacing > 0
+          ? groupSpacing
+          : axis === 'horizontal'
+            ? avgW * 0.6
+            : avgH * 0.6;
 
       const dirSign = direction === 'end' ? 1 : -1;
 
-      const newIds: string[] = [];
+      let du = 0;
+      let dv = 0;
+      if (axis === 'horizontal') {
+        const deltaX = (seed.w + baseSpacing) * dirSign;
+        du = deltaX / localBounds.width;
+      } else {
+        const deltaY = (seed.h + baseSpacing) * dirSign;
+        dv = deltaY / localBounds.height;
+      }
 
-      setDraftLeds((prev) => {
-        const idToLed = new Map<string, ManualLED>();
-        for (const led of prev) {
-          idToLed.set(led.id, led);
-        }
+      const newLed: ManualLED = {
+        id: createLedId(),
+        u: seed.u + du,
+        v: seed.v + dv,
+        rotation: seed.rotation,
+        ...(seed.scale != null && seed.scale !== 1 && { scale: seed.scale }),
+      };
 
-        const existing: { led: ManualLED; abs: (typeof absoluteLeds)[number] | null }[] = [];
-        for (const id of selectedIds) {
-          const led = idToLed.get(id);
-          if (!led) continue;
-          const abs = absoluteLeds.find((a) => a.id === id) ?? null;
-          existing.push({ led, abs });
-        }
-
-        if (existing.length === 0) return prev;
-
-        let sumW = 0;
-        let sumH = 0;
-        let countWithSize = 0;
-        for (const { abs } of existing) {
-          if (!abs) continue;
-          sumW += abs.w;
-          sumH += abs.h;
-          countWithSize += 1;
-        }
-        const avgW = countWithSize > 0 ? sumW / countWithSize : BASE_LED_WIDTH;
-        const avgH = countWithSize > 0 ? sumH / countWithSize : BASE_LED_HEIGHT;
-
-        const baseSpacing =
-          groupSpacing > 0
-            ? groupSpacing
-            : axis === 'horizontal'
-              ? avgH * 0.6
-              : avgW * 0.6;
-
-        let du = 0;
-        let dv = 0;
-        if (axis === 'horizontal') {
-          // Add a new row vertically (layer)
-          const deltaY = (avgH + baseSpacing) * dirSign;
-          dv = deltaY / localBounds.height;
-        } else {
-          // Add a new column horizontally (layer)
-          const deltaX = (avgW + baseSpacing) * dirSign;
-          du = deltaX / localBounds.width;
-        }
-
-        const next = [...prev];
-        for (const { led } of existing) {
-          const id = createLedId();
-          newIds.push(id);
-          next.push({
-            ...led,
-            id,
-            u: led.u + du,
-            v: led.v + dv,
-          });
-        }
+      setDraftLeds((prev) => [...prev, newLed]);
+      setSelectedLedIds((prev) => {
+        const next = new Set(prev);
+        next.add(newLed.id);
         return next;
       });
-
-      if (newIds.length > 0) {
-        setSelectedLedIds((prev) => {
-          const next = new Set(prev);
-          for (const id of newIds) next.add(id);
-          return next;
-        });
-        setIsDirty(true);
-      }
+      setIsDirty(true);
     },
-    [absoluteLeds, inferredGroupAxis, localBounds, selectedLedIds, groupSpacing]
+    [effectiveGroupAxis, groupSpacing, localBounds, selectedAbsoluteLeds]
   );
 
   const handleSave = useCallback(() => {
@@ -1657,52 +1639,7 @@ export const ManualDesignerPage: React.FC = () => {
                       );
                     })()}
 
-                  {/* Group extend plus buttons at selection ends */}
-                  {selectedLedIds.size >= 2 &&
-                    groupExtendHandles.map((handle) => {
-                      const r =
-                        averageSelectedSize > 0
-                          ? Math.max(2.2, Math.min(3.2, averageSelectedSize * 0.2))
-                          : 2.6;
-                      return (
-                        <g
-                          key={`extend-${handle.direction}`}
-                          transform={`translate(${handle.x}, ${handle.y})`}
-                          style={{ cursor: 'pointer', pointerEvents: 'all' }}
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                            handleExtendGroup(handle.direction);
-                          }}
-                        >
-                          <circle
-                            cx={0}
-                            cy={0}
-                            r={r}
-                            fill="#0f172a"
-                            stroke="#38bdf8"
-                            strokeWidth={0.7}
-                          />
-                          <line
-                            x1={-r * 0.4}
-                            y1={0}
-                            x2={r * 0.4}
-                            y2={0}
-                            stroke="#e5f3ff"
-                            strokeWidth={0.7}
-                            strokeLinecap="round"
-                          />
-                          <line
-                            x1={0}
-                            y1={-r * 0.4}
-                            x2={0}
-                            y2={r * 0.4}
-                            stroke="#e5f3ff"
-                            strokeWidth={0.7}
-                            strokeLinecap="round"
-                          />
-                        </g>
-                      );
-                    })}
+                  {/* Group extend plus buttons temporarily disabled */}
                   {/* Selected LED handles on top so they work when overlapping another module (single only) */}
                   {primarySelectedId &&
                     (() => {
