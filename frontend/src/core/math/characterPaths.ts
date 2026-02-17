@@ -44,6 +44,7 @@ const FALLBACK_LETTERS: Record<string, string> = {
 export interface CharacterPath {
   char: string;
   charIndex: number;
+  charId?: string;
   pathData: string;
   x: number;
   width: number;
@@ -53,6 +54,61 @@ export interface CharacterPath {
     y: number;
     width: number;
     height: number;
+  };
+}
+
+export function generatePositionedCharacterPath(
+  glyph: string,
+  font: Font | null,
+  startX: number,
+  baselineY: number,
+  fontSize: number,
+  charId?: string
+): CharacterPath {
+  if (font) {
+    const glyphModel = font.charToGlyph(glyph);
+    const path = glyphModel.getPath(startX, baselineY, fontSize);
+    const pathData = path.toPathData(2);
+    const scale = fontSize / font.unitsPerEm;
+    const glyphBbox = glyphModel.getBoundingBox();
+    const glyphWidth = (glyphBbox.x2 - glyphBbox.x1) * scale;
+    const advanceWidth = (glyphModel.advanceWidth || font.unitsPerEm * 0.6) * scale;
+    const bboxX = startX + glyphBbox.x1 * scale;
+    const bboxY = baselineY - glyphBbox.y2 * scale;
+    const bboxHeight = (glyphBbox.y2 - glyphBbox.y1) * scale;
+    return {
+      char: glyph,
+      charIndex: 0,
+      charId,
+      pathData,
+      x: startX,
+      width: glyphWidth,
+      advanceWidth,
+      bbox: {
+        x: bboxX,
+        y: bboxY,
+        width: glyphWidth,
+        height: bboxHeight,
+      },
+    };
+  }
+
+  const fallbackPathData = generateFallbackCharPath(glyph, startX, baselineY, fontSize);
+  const width = fontSize * 0.7;
+  return {
+    char: glyph,
+    charIndex: 0,
+    charId,
+    pathData: fallbackPathData,
+    x: startX,
+    width,
+    advanceWidth: width + fontSize * 0.1,
+    bbox: {
+      x: startX,
+      y: baselineY - fontSize,
+      width,
+      height: fontSize,
+    },
   };
 }
 

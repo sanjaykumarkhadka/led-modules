@@ -11,12 +11,14 @@ import { isCapsuleInside, isPointInside } from '../../core/math/geometry';
 import { useToast } from '../ui/ToastProvider';
 import { useConfirm } from '../ui/ConfirmProvider';
 import { InlineError } from '../ui/InlineError';
+import { useProjectsStore } from '../../state/projectsStore';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
   'M152.924,300.748c84.319,0,152.912-68.6,152.912-152.918c0-39.476-15.312-77.231-42.346-105.564 c0,0,3.938-8.857,8.814-19.783c4.864-10.926-2.138-18.636-15.648-17.228l-79.125,8.289c-13.511,1.411-17.999,11.467-10.021,22.461 l46.741,64.393c7.986,10.992,17.834,12.31,22.008,2.937l7.56-16.964c12.172,18.012,18.976,39.329,18.976,61.459 c0,60.594-49.288,109.875-109.87,109.875c-60.591,0-109.882-49.287-109.882-109.875c0-19.086,4.96-37.878,14.357-54.337 c5.891-10.325,2.3-23.467-8.025-29.357c-10.328-5.896-23.464-2.3-29.36,8.031C6.923,95.107,0,121.27,0,147.829 C0,232.148,68.602,300.748,152.924,300.748z';
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
+const MAX_ZOOM_IN_FACTOR = 0.18;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -58,16 +60,24 @@ const zoomViewBox = (viewBox: ViewBox, factor: number, anchor: { x: number; y: n
   };
 };
 
-export const ManualDesignerPage: React.FC = () => {
+interface ManualDesignerPageProps {
+  projectId: string;
+  charId: string;
+  onBack: () => void;
+}
+
+export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectId, charId, onBack }) => {
   const blocks = useProjectStore((state) => state.blocks);
-  const editorCharId = useProjectStore((state) => state.editorCharId);
-  const closeEditor = useProjectStore((state) => state.closeEditor);
-  const setCharPlacementMode = useProjectStore((state) => state.setCharPlacementMode);
+  const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
   const setCharManualLeds = useProjectStore((state) => state.setCharManualLeds);
   const currentModule = useProjectStore((state) => state.getCurrentModule());
+  const projects = useProjectsStore((state) => state.projects);
+  const saveCurrentProject = useProjectsStore((state) => state.saveCurrentProject);
+  const projectsSaving = useProjectsStore((state) => state.loading);
   const { notify } = useToast();
   const { confirm } = useConfirm();
+  const editorCharId = charId;
 
   const [snapEnabled] = useState(false);
   const [gridSize] = useState(2);
@@ -155,29 +165,45 @@ export const ManualDesignerPage: React.FC = () => {
   const blockCharPaths = useMemo(() => {
     return blocks.map((block) => {
       const blockFont = fonts.get(block.language);
-      let charPaths: CharacterPath[];
-      if (blockFont && block.text) {
-        charPaths = generateCharacterPaths(block.text, blockFont, block.x, block.y, block.fontSize);
+      const chars = [...(charactersByBlock[block.id] ?? [])].sort((a, b) => a.order - b.order);
+      let charPaths: CharacterPath[] = [];
+      if (chars.length > 0) {
+        charPaths = chars.map((char, index) => {
+          const single = blockFont
+            ? generateCharacterPaths(char.glyph, blockFont, char.x, char.baselineY, char.fontSize)
+            : generateFallbackCharacterPaths(char.glyph, char.x, char.baselineY, char.fontSize);
+          return {
+            ...single[0],
+            charIndex: index,
+            charId: char.id,
+          };
+        });
       } else if (block.text) {
         charPaths = generateFallbackCharacterPaths(block.text, block.x, block.y, block.fontSize);
-      } else {
-        charPaths = [];
       }
-      return {
-        blockId: block.id,
-        charPaths,
-      };
+      return { blockId: block.id, charPaths };
     });
-  }, [blocks, fonts]);
+  }, [blocks, charactersByBlock, fonts]);
 
   const charPath = useMemo(() => {
     if (!editorCharId) return null;
-    const [blockId, charIndexStr] = editorCharId.split('-');
-    const charIndex = parseInt(charIndexStr, 10);
-    const block = blockCharPaths.find((bp) => bp.blockId === blockId);
-    if (!block) return null;
-    return block.charPaths.find((cp) => cp.charIndex === charIndex) || null;
+    for (const block of blockCharPaths) {
+      const matched = block.charPaths.find((cp) => cp.charId === editorCharId);
+      if (matched) return matched;
+    }
+    return null;
   }, [blockCharPaths, editorCharId]);
+
+  const activeBlockFontSize = useMemo(() => {
+    if (!editorCharId) return 150;
+    for (const chars of Object.values(charactersByBlock)) {
+      const found = chars.find((char) => char.id === editorCharId);
+      if (found) return found.fontSize;
+    }
+    return 150;
+  }, [charactersByBlock, editorCharId]);
+
+  const charVisualScale = useMemo(() => clamp(activeBlockFontSize / 150, 0.05, 3), [activeBlockFontSize]);
 
   const bbox = charPath?.bbox || null;
   const [pathBounds, setPathBounds] = useState<{
@@ -232,8 +258,10 @@ export const ManualDesignerPage: React.FC = () => {
   const clampViewBoxToBase = useCallback(
     (next: ViewBox) => {
       if (!baseViewBox) return next;
-      const clampedWidth = Math.min(next.width, baseViewBox.width);
-      const clampedHeight = Math.min(next.height, baseViewBox.height);
+      const minWidth = baseViewBox.width * MAX_ZOOM_IN_FACTOR;
+      const minHeight = baseViewBox.height * MAX_ZOOM_IN_FACTOR;
+      const clampedWidth = Math.max(minWidth, Math.min(next.width, baseViewBox.width));
+      const clampedHeight = Math.max(minHeight, Math.min(next.height, baseViewBox.height));
       const minX = baseViewBox.x;
       const minY = baseViewBox.y;
       const maxX = baseViewBox.x + baseViewBox.width - clampedWidth;
@@ -300,8 +328,8 @@ export const ManualDesignerPage: React.FC = () => {
           ((leg.width ?? BASE_LED_WIDTH) / BASE_LED_WIDTH +
             (leg.height ?? BASE_LED_HEIGHT) / BASE_LED_HEIGHT) /
           2;
-      const w = BASE_LED_WIDTH * scale;
-      const h = BASE_LED_HEIGHT * scale;
+      const w = BASE_LED_WIDTH * scale * charVisualScale;
+      const h = BASE_LED_HEIGHT * scale * charVisualScale;
       return {
         ...led,
         x: localBounds.x + led.u * localBounds.width,
@@ -311,7 +339,7 @@ export const ManualDesignerPage: React.FC = () => {
         scale,
       };
     });
-  }, [draftLeds, localBounds]);
+  }, [charVisualScale, draftLeds, localBounds]);
 
   /** Render order: draw lower LEDs first so higher ones (smaller y) are on top and get clicks. */
   const absoluteLedsRenderOrder = useMemo(
@@ -432,7 +460,7 @@ export const ManualDesignerPage: React.FC = () => {
       if (
         !forceInsideBounds &&
         pathRef.current &&
-        !isCapsuleInside(pathRef.current, snapped.x, snapped.y, rotation, 6)
+        !isCapsuleInside(pathRef.current, snapped.x, snapped.y, rotation, 6 * charVisualScale)
       ) {
         return;
       }
@@ -448,7 +476,7 @@ export const ManualDesignerPage: React.FC = () => {
       setSelectedLedIds(new Set([newLed.id]));
       setIsDirty(true);
     },
-    [localBounds, snapPoint, toManual]
+    [charVisualScale, localBounds, snapPoint, toManual]
   );
 
   const handleLedPointerDown = useCallback(
@@ -1149,11 +1177,24 @@ export const ManualDesignerPage: React.FC = () => {
 
   const handleSave = useCallback(async () => {
     if (!editorCharId) return;
+    const existingProject = projects.find((p) => p._id === projectId);
+    const projectName = existingProject?.name?.trim() || 'Untitled project';
+    const projectDescription = existingProject?.description;
+
     if (!localBounds) {
       setCharManualLeds(editorCharId, draftLeds);
-      setCharPlacementMode(editorCharId, 'manual');
+      await saveCurrentProject(projectName, projectDescription);
+      const persistenceError = useProjectsStore.getState().errorMessage;
+      if (persistenceError) {
+        notify({
+          variant: 'error',
+          title: 'Failed to persist manual layout',
+          description: persistenceError,
+        });
+        return;
+      }
       notify({ variant: 'success', title: 'Manual layout saved' });
-      closeEditor();
+      onBack();
       return;
     }
     const margin = 0.001;
@@ -1195,36 +1236,45 @@ export const ManualDesignerPage: React.FC = () => {
     setSaveError(null);
     const confirmed = await confirm({
       title: 'Save manual placement?',
-      description: 'This character will remain in manual placement mode.',
+      description: 'This character manual layout will be saved to the project.',
       confirmText: 'Save changes',
       cancelText: 'Continue editing',
     });
     if (!confirmed) return;
     setCharManualLeds(editorCharId, draftLeds);
-    setCharPlacementMode(editorCharId, 'manual');
+    await saveCurrentProject(projectName, projectDescription);
+    const persistenceError = useProjectsStore.getState().errorMessage;
+    if (persistenceError) {
+      notify({
+        variant: 'error',
+        title: 'Failed to persist manual layout',
+        description: persistenceError,
+      });
+      return;
+    }
     notify({ variant: 'success', title: 'Manual layout saved' });
-    closeEditor();
+    onBack();
   }, [
-    closeEditor,
     confirm,
     draftLeds,
     editorCharId,
     localBounds,
     notify,
+    onBack,
+    projectId,
+    projects,
+    saveCurrentProject,
     setCharManualLeds,
-    setCharPlacementMode,
   ]);
 
   const handleCancel = useCallback(() => {
-    closeEditor();
-  }, [closeEditor]);
-
-  if (!editorCharId) return null;
+    onBack();
+  }, [onBack]);
 
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="fixed inset-0 z-[120] isolate text-[var(--text-1)]">
+    <div className="relative min-h-screen isolate text-[var(--text-1)]">
       <div
         className="absolute inset-0 pointer-events-none bg-[var(--surface-app)]"
         style={{
@@ -1248,6 +1298,7 @@ export const ManualDesignerPage: React.FC = () => {
                 <div className="text-lg font-semibold">
                   {charPath?.char || 'Character'} · {editorCharId}
                 </div>
+                <div className="text-xs text-[var(--text-3)]">Project {projectId}</div>
               </div>
               {isDirty && <span className="text-xs text-[var(--warning-300)]">Unsaved changes</span>}
             </div>
@@ -1262,9 +1313,10 @@ export const ManualDesignerPage: React.FC = () => {
                 onClick={() => {
                   void handleSave();
                 }}
+                disabled={projectsSaving}
                 className="px-4 py-2 rounded-lg bg-[var(--accent-500)] text-white font-semibold hover:bg-[var(--accent-600)]"
               >
-                Save Changes
+                {projectsSaving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>

@@ -11,6 +11,7 @@ import { useProjectStore } from '../data/store';
 
 export interface DesignData {
   blocks: ReturnType<typeof useProjectStore.getState>['blocks'];
+  charactersByBlock?: ReturnType<typeof useProjectStore.getState>['charactersByBlock'];
   depthInches: number;
   selectedModuleId: string;
   showDimensions: boolean;
@@ -48,10 +49,53 @@ function toErrorMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
+function createLegacyCharId(blockId: string, index: number) {
+  return `${blockId}-${index}`;
+}
+
+function remapLegacyOverrides<T>(
+  source: Record<string, T> | undefined,
+  idMap: Record<string, string>
+): Record<string, T> {
+  if (!source) return {};
+  const next: Record<string, T> = {};
+  Object.entries(source).forEach(([key, value]) => {
+    const remapped = idMap[key] ?? key;
+    next[remapped] = value;
+  });
+  return next;
+}
+
+function migrateCharactersFromBlocks(design: DesignData) {
+  const charactersByBlock: ReturnType<typeof useProjectStore.getState>['charactersByBlock'] = {};
+  const idMap: Record<string, string> = {};
+
+  design.blocks.forEach((block) => {
+    const glyphs = Array.from(block.text || '');
+    const spacing = Math.max(1, block.fontSize * 0.76);
+    charactersByBlock[block.id] = glyphs.map((glyph, index) => {
+      const newId = `${block.id}-char-${index}-${Math.random().toString(36).slice(2, 8)}`;
+      idMap[createLegacyCharId(block.id, index)] = newId;
+      return {
+        id: newId,
+        glyph,
+        x: block.x + index * spacing,
+        baselineY: block.y,
+        fontSize: block.fontSize,
+        language: block.language,
+        order: index,
+      };
+    });
+  });
+
+  return { charactersByBlock, idMap };
+}
+
 function serializeDesign(): DesignData {
   const state = useProjectStore.getState();
   return {
     blocks: state.blocks,
+    charactersByBlock: state.charactersByBlock,
     depthInches: state.depthInches,
     selectedModuleId: state.selectedModuleId,
     showDimensions: state.showDimensions,
@@ -65,17 +109,28 @@ function serializeDesign(): DesignData {
 }
 
 function applyDesign(design: DesignData) {
+  let charactersByBlock =
+    design.charactersByBlock as ReturnType<typeof useProjectStore.getState>['charactersByBlock'] | undefined;
+  let idMap: Record<string, string> = {};
+
+  if (!charactersByBlock || Object.keys(charactersByBlock).length === 0) {
+    const migrated = migrateCharactersFromBlocks(design);
+    charactersByBlock = migrated.charactersByBlock;
+    idMap = migrated.idMap;
+  }
+
   useProjectStore.setState({
     blocks: design.blocks,
+    charactersByBlock,
     depthInches: design.depthInches,
     selectedModuleId: design.selectedModuleId,
     showDimensions: design.showDimensions,
     dimensionUnit: design.dimensionUnit,
-    manualLedOverrides: design.manualLedOverrides,
-    ledCountOverrides: design.ledCountOverrides,
-    ledColumnOverrides: design.ledColumnOverrides,
-    ledOrientationOverrides: design.ledOrientationOverrides,
-    placementModeOverrides: design.placementModeOverrides,
+    manualLedOverrides: remapLegacyOverrides(design.manualLedOverrides, idMap),
+    ledCountOverrides: remapLegacyOverrides(design.ledCountOverrides, idMap),
+    ledColumnOverrides: remapLegacyOverrides(design.ledColumnOverrides, idMap),
+    ledOrientationOverrides: remapLegacyOverrides(design.ledOrientationOverrides, idMap),
+    placementModeOverrides: remapLegacyOverrides(design.placementModeOverrides, idMap),
   });
 }
 
@@ -143,7 +198,10 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       const project = await getProject(accessToken, id);
       const design = project.data as unknown as DesignData;
       applyDesign(design);
+      const existingProjects = get().projects;
+      const withoutCurrent = existingProjects.filter((p) => p._id !== project._id);
       set({
+        projects: [project, ...withoutCurrent],
         currentProjectId: project._id,
         loading: false,
       });
@@ -176,11 +234,11 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       } else {
         project = await createProject(accessToken, payload);
       }
-      // refresh list
-      const projects = await listProjects(accessToken);
+      const existingProjects = get().projects;
+      const withoutCurrent = existingProjects.filter((p) => p._id !== project._id);
       set({
         currentProjectId: project._id,
-        projects,
+        projects: [project, ...withoutCurrent],
         loading: false,
       });
     } catch (err: unknown) {

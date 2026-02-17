@@ -1,122 +1,251 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useProjectStore } from '../data/store';
 import { useProjectsStore } from '../state/projectsStore';
 import { MODULE_CATALOG } from '../data/catalog/modules';
 import { Button } from '../components/ui/Button';
 import { CanvasStage } from '../components/canvas/CanvasStage';
-import { ManualDesignerPage } from '../components/editor/ManualDesignerPage';
-import { generatePDFReport } from '../utils/pdfReport';
 import { InlineError } from '../components/ui/InlineError';
 import { Select } from '../components/ui/Select';
 import { Input } from '../components/ui/Input';
-import { Modal } from '../components/ui/Modal';
-import { useToast } from '../components/ui/ToastProvider';
-import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { FieldRow } from '../components/ui/FieldRow';
 import { ToolRailButton } from '../components/ui/ToolRailButton';
+import { useToast } from '../components/ui/ToastProvider';
+
+const MIN_DESIGN_FONT_SIZE = 8;
+const MAX_DESIGN_FONT_SIZE = 96;
+const SYNC_INTERVAL_MS = 3000;
+
+type SyncState = 'synced' | 'pending' | 'syncing' | 'error';
+
+function clampFontSize(value: number) {
+  if (!Number.isFinite(value)) return 24;
+  return Math.min(MAX_DESIGN_FONT_SIZE, Math.max(MIN_DESIGN_FONT_SIZE, Math.round(value)));
+}
+
+function pruneOverrideKeys(removedCharIds: Set<string>) {
+  if (removedCharIds.size === 0) return;
+  useProjectStore.setState((state) => {
+    const prune = <T,>(source: Record<string, T>) =>
+      Object.fromEntries(
+        Object.entries(source ?? {}).filter(([key]) => !removedCharIds.has(key))
+      ) as Record<string, T>;
+
+    return {
+      manualLedOverrides: prune(state.manualLedOverrides ?? {}),
+      ledCountOverrides: prune(state.ledCountOverrides ?? {}),
+      ledColumnOverrides: prune(state.ledColumnOverrides ?? {}),
+      ledOrientationOverrides: prune(state.ledOrientationOverrides ?? {}),
+      placementModeOverrides: prune(state.placementModeOverrides ?? {}),
+    };
+  });
+}
 
 export function DesignerPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const location = useLocation() as { state?: { name?: string; description?: string } };
   const navigate = useNavigate();
+  const { notify } = useToast();
+
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
-  const [panelTab, setPanelTab] = useState('filters');
+  const [newCharacter, setNewCharacter] = useState('');
+  const [depthInput, setDepthInput] = useState('5');
+  const [syncState, setSyncState] = useState<SyncState>('synced');
 
-  const {
-    projects,
-    openProject,
-    saveCurrentProject,
-    loading: projectsLoading,
-    errorMessage: projectsError,
-  } = useProjectsStore();
+  const autosaveInFlightRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const openedProjectIdRef = useRef<string | null>(null);
+  const lastAutosaveErrorRef = useRef<string | null>(null);
+
+  const { projects, openProject, saveCurrentProject, errorMessage: projectsError } = useProjectsStore();
 
   const {
     blocks,
+    charactersByBlock,
     depthInches,
     selectedModuleId,
     totalModules,
     totalPowerWatts,
     recommendedPSU,
     selectedCharId,
-    editorCharId,
-    updateBlock,
+    selectChar,
     setDepth,
     setModule,
-    openEditor,
-    setCharPlacementMode,
-    getCharPlacementMode,
+    addCharacter,
+    removeCharacter,
+    updateCharacter,
   } = useProjectStore();
 
-  const { notify } = useToast();
+  const activeBlock = blocks[0];
+  const characters = useMemo(() => {
+    if (!activeBlock) return [];
+    return [...(charactersByBlock[activeBlock.id] ?? [])].sort((a, b) => a.order - b.order);
+  }, [activeBlock, charactersByBlock]);
+
+  const selectedCharacter = useMemo(
+    () => characters.find((char) => char.id === selectedCharId) ?? null,
+    [characters, selectedCharId]
+  );
 
   useEffect(() => {
     if (projectId && projectId !== 'new') {
+      if (openedProjectIdRef.current === projectId) return;
+      openedProjectIdRef.current = projectId;
       void openProject(projectId);
-      const existing = projects.find((p) => p._id === projectId);
-      if (existing) {
-        queueMicrotask(() => {
-          setProjectName(existing.name || '');
-          setProjectDescription(existing.description || '');
-        });
-      }
-    } else {
-      queueMicrotask(() => {
-        setProjectName(location.state?.name || '');
-        setProjectDescription(location.state?.description || '');
-      });
-    }
-  }, [projectId, openProject, projects, location.state]);
-
-  const currentModule = MODULE_CATALOG.find((m) => m.id === selectedModuleId);
-  const selectedCharMode = selectedCharId ? getCharPlacementMode(selectedCharId) : 'auto';
-
-  const activeBlock = blocks[0];
-  const handleGeneratePDF = async () => {
-    if (!currentModule) {
-      notify({
-        variant: 'error',
-        title: 'No module selected',
-        description: 'Select an LED module before exporting PDF.',
-      });
       return;
     }
 
-    const { computedLayoutData } = useProjectStore.getState();
-
-    await generatePDFReport({
-      blocks,
-      totalModules,
-      totalPowerWatts,
-      depthInches,
-      currentModule,
-      recommendedPSU,
-      blockCharPaths: computedLayoutData?.blockCharPaths,
-      charLeds: computedLayoutData?.charLeds,
+    openedProjectIdRef.current = null;
+    queueMicrotask(() => {
+      setProjectName(location.state?.name || '');
+      setProjectDescription(location.state?.description || '');
     });
+  }, [projectId, openProject, location.state]);
 
-    notify({ variant: 'success', title: 'PDF exported' });
-  };
+  useEffect(() => {
+    if (!projectId || projectId === 'new') return;
+    const existing = projects.find((p) => p._id === projectId);
+    if (!existing) return;
+    queueMicrotask(() => {
+      setProjectName(existing.name || '');
+      setProjectDescription(existing.description || '');
+    });
+  }, [projectId, projects]);
 
-  const handleSaveProject = async () => {
-    if (!projectName.trim()) {
-      setProjectDialogOpen(true);
+  useEffect(() => {
+    setDepthInput(String(depthInches));
+  }, [depthInches]);
+
+  useEffect(() => {
+    if (characters.length === 0) {
+      if (selectedCharId) selectChar(null);
       return;
     }
-    await saveCurrentProject(projectName, projectDescription);
-    notify({
-      variant: 'success',
-      title: 'Project saved',
-      description: projectName || 'Untitled project',
-    });
-  };
+    if (!selectedCharacter) {
+      selectChar(characters[0].id);
+    }
+  }, [characters, selectedCharId, selectedCharacter, selectChar]);
 
   const voltageOptions = useMemo(() => ['All', '12V', '24V'], []);
 
+  const markDirty = useCallback(() => {
+    if (!projectId || projectId === 'new') return;
+    dirtyRef.current = true;
+    setSyncState((prev) => (prev === 'syncing' ? prev : 'pending'));
+  }, [projectId]);
+
+  const flushSync = useCallback(async () => {
+    if (!projectId || projectId === 'new') return;
+    if (!dirtyRef.current || autosaveInFlightRef.current) return;
+
+    autosaveInFlightRef.current = true;
+    setSyncState('syncing');
+    try {
+      while (dirtyRef.current) {
+        dirtyRef.current = false;
+        const state = useProjectsStore.getState();
+        const projectMeta = state.projects.find((p) => p._id === projectId);
+        const name =
+          projectMeta?.name?.trim() ||
+          projectName.trim() ||
+          location.state?.name?.trim() ||
+          'Untitled project';
+        const description = projectMeta?.description ?? (projectDescription || undefined);
+        await saveCurrentProject(name, description);
+        const saveErr = useProjectsStore.getState().errorMessage;
+        if (saveErr) throw new Error(saveErr);
+      }
+      setSyncState('synced');
+      lastAutosaveErrorRef.current = null;
+    } catch (err: unknown) {
+      dirtyRef.current = true;
+      const message = err instanceof Error ? err.message : 'Autosync failed';
+      if (message !== lastAutosaveErrorRef.current) {
+        notify({
+          variant: 'error',
+          title: 'Sync failed',
+          description: message,
+        });
+      }
+      lastAutosaveErrorRef.current = message;
+      setSyncState('error');
+    } finally {
+      autosaveInFlightRef.current = false;
+    }
+  }, [location.state?.name, notify, projectDescription, projectId, projectName, saveCurrentProject]);
+
+  useEffect(() => {
+    if (!projectId || projectId === 'new') return;
+    const timer = window.setInterval(() => {
+      void flushSync();
+    }, SYNC_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [flushSync, projectId]);
+
+  useEffect(() => {
+    return () => {
+      void flushSync();
+    };
+  }, [flushSync]);
+
+  const applyDepthFromInput = useCallback(
+    (value: string) => {
+      const parsed = Number.parseFloat(value);
+      if (!Number.isFinite(parsed)) {
+        setDepthInput(String(depthInches));
+        return;
+      }
+      const clamped = Math.min(12, Math.max(1, parsed));
+      setDepth(clamped);
+      setDepthInput(String(clamped));
+      markDirty();
+    },
+    [depthInches, markDirty, setDepth]
+  );
+
+  const syncLabel =
+    syncState === 'syncing'
+      ? 'Syncing...'
+      : syncState === 'pending'
+        ? 'Sync pending'
+        : syncState === 'error'
+          ? 'Sync error'
+          : 'Synced';
+
+  const handleAddCharacter = useCallback(() => {
+    if (!activeBlock) return;
+    const glyph = Array.from(newCharacter.trim())[0];
+    if (!glyph) return;
+    const createdId = addCharacter(activeBlock.id, glyph);
+    setNewCharacter('');
+    if (createdId) {
+      selectChar(createdId);
+      markDirty();
+    }
+  }, [activeBlock, addCharacter, markDirty, newCharacter, selectChar]);
+
+  const handleRemoveCharacter = useCallback(
+    (charId: string) => {
+      if (!activeBlock) return;
+      const removedSet = new Set<string>([charId]);
+      removeCharacter(activeBlock.id, charId);
+      pruneOverrideKeys(removedSet);
+      const remaining = [...(useProjectStore.getState().charactersByBlock[activeBlock.id] ?? [])].sort(
+        (a, b) => a.order - b.order
+      );
+      if (remaining.length > 0) {
+        selectChar(remaining[Math.max(0, remaining.length - 1)].id);
+      } else {
+        selectChar(null);
+      }
+      markDirty();
+    },
+    [activeBlock, markDirty, removeCharacter, selectChar]
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3">
       <header className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)]">
         <div className="flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
@@ -125,50 +254,97 @@ export function DesignerPage() {
             </Button>
             <span className="text-3xl font-semibold">Channel Letter</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="pill" className="px-8" onClick={handleGeneratePDF}>
-              PDF →
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-full px-7"
-              onClick={handleSaveProject}
-              disabled={projectsLoading}
-              loading={projectsLoading}
-            >
-              Save
-            </Button>
+          <div
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              syncState === 'error'
+                ? 'border-[var(--danger-500)] text-[var(--danger-500)]'
+                : 'border-[var(--border-2)] text-[var(--text-3)]'
+            }`}
+          >
+            {syncLabel}
           </div>
         </div>
       </header>
 
       {projectsError && <InlineError message={projectsError} />}
 
-      <main className="grid grid-cols-[76px_minmax(0,1fr)_510px] gap-3">
-        <aside className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-2">
+      <main className="grid h-full min-h-0 flex-1 grid-cols-[76px_minmax(0,1fr)_510px] gap-3 overflow-hidden">
+        <aside className="h-full min-h-0 rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-2">
           <div className="flex flex-col items-center gap-2">
             <ToolRailButton srLabel="Zoom In" icon={<span aria-hidden className="text-lg">⊕</span>} />
             <ToolRailButton srLabel="Zoom Out" icon={<span aria-hidden className="text-lg">⊖</span>} />
           </div>
         </aside>
 
-        <section className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-subtle)]">
-          <div className="h-[760px]">
-            <CanvasStage />
+        <section className="h-full min-h-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-subtle)]">
+          <div className="h-full min-h-0">
+            <CanvasStage onCharacterMutate={markDirty} />
           </div>
         </section>
 
-        <aside className="space-y-3 rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
-          <div className="flex items-center justify-between">
-            <SegmentedControl
-              value={panelTab}
-              onChange={setPanelTab}
-              options={[
-                { label: 'Population Filters', value: 'filters' },
-                { label: 'Properties', value: 'props' },
-              ]}
-            />
-            <span className="text-2xl text-[var(--text-3)]">»</span>
+        <aside className="h-full min-h-0 space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
+          <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-elevated)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)]">
+              Characters
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {characters.map((char) => {
+                const selected = selectedCharId === char.id;
+                return (
+                  <div
+                    key={char.id}
+                    className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 ${
+                      selected
+                        ? 'border-[var(--accent-400)] bg-[var(--accent-soft)] text-[var(--accent-600)]'
+                        : 'border-[var(--border-2)] bg-[var(--surface-subtle)] text-[var(--text-2)]'
+                    }`}
+                  >
+                    <button type="button" onClick={() => selectChar(char.id)} className="text-sm">
+                      {char.glyph}
+                    </button>
+                    {projectId && projectId !== 'new' && (
+                      <button
+                        type="button"
+                        aria-label="Open manual editor"
+                        title="Open manual editor"
+                        onClick={() => navigate(`/projects/${projectId}/manual/${char.id}`)}
+                        className="text-xs hover:text-[var(--text-1)]"
+                      >
+                        ✎
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      aria-label="Remove character"
+                      title="Remove character"
+                      onClick={() => handleRemoveCharacter(char.id)}
+                      className="text-xs hover:text-[var(--danger-500)]"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                value={newCharacter}
+                maxLength={2}
+                placeholder="Add char"
+                onChange={(e) => setNewCharacter(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCharacter();
+                  }
+                }}
+                className="h-9 bg-[var(--surface-subtle)]"
+              />
+              <Button size="sm" variant="outline" onClick={handleAddCharacter}>
+                Add
+              </Button>
+            </div>
           </div>
 
           <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--surface-panel)] p-1">
@@ -176,26 +352,9 @@ export function DesignerPage() {
               label="Selected Character"
               control={
                 <Input
-                  value={selectedCharId ?? 'None selected'}
+                  value={selectedCharacter ? `${selectedCharacter.glyph} (${selectedCharacter.id})` : 'None selected'}
                   readOnly
                   className="h-11 bg-[var(--surface-strong)]"
-                />
-              }
-            />
-            <FieldRow
-              label="Placement"
-              control={
-                <SegmentedControl
-                  value={selectedCharMode}
-                  onChange={(value) => {
-                    if (!selectedCharId) return;
-                    setCharPlacementMode(selectedCharId, value as 'auto' | 'manual');
-                  }}
-                  options={[
-                    { label: 'Auto', value: 'auto' },
-                    { label: 'Manual', value: 'manual' },
-                  ]}
-                  className="w-full justify-center"
                 />
               }
             />
@@ -204,31 +363,20 @@ export function DesignerPage() {
               control={
                 <Button
                   variant="outline"
-                  size="sm"
-                  className="w-full justify-center"
-                  disabled={!selectedCharId}
+                  className="h-11 w-full justify-center"
+                  disabled={!selectedCharId || !projectId || projectId === 'new'}
                   onClick={() => {
-                    if (!selectedCharId) return;
-                    setCharPlacementMode(selectedCharId, 'manual');
-                    openEditor(selectedCharId);
+                    if (!selectedCharId || !projectId || projectId === 'new') return;
+                    navigate(`/projects/${projectId}/manual/${selectedCharId}`);
                   }}
                 >
-                  Open editor
+                  Open Manual Editor
                 </Button>
               }
             />
             <FieldRow
               label="Your Text"
-              control={
-                <Input
-                  value={activeBlock?.text ?? ''}
-                  onChange={(e) => {
-                    if (!activeBlock) return;
-                    updateBlock(activeBlock.id, { text: e.target.value });
-                  }}
-                  className="h-11 bg-[var(--surface-strong)]"
-                />
-              }
+              control={<Input value={characters.map((char) => char.glyph).join('')} readOnly className="h-11 bg-[var(--surface-strong)]" />}
             />
             <FieldRow
               label="Layout Type"
@@ -250,12 +398,22 @@ export function DesignerPage() {
               label="Depth"
               control={
                 <Input
-                  type="number"
-                  value={depthInches}
-                  step={0.5}
-                  min={1}
-                  max={12}
-                  onChange={(e) => setDepth(parseFloat(e.target.value) || 1)}
+                  type="text"
+                  inputMode="decimal"
+                  pattern="^[0-9]*[.]?[0-9]*$"
+                  value={depthInput}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (/^\d*\.?\d*$/.test(next)) setDepthInput(next);
+                  }}
+                  onBlur={(e) => applyDepthFromInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      applyDepthFromInput((e.currentTarget as HTMLInputElement).value);
+                      (e.currentTarget as HTMLInputElement).blur();
+                    }
+                  }}
                   className="h-11 bg-[var(--surface-subtle)]"
                 />
               }
@@ -263,15 +421,26 @@ export function DesignerPage() {
             <FieldRow
               label="Height"
               control={
-                <Input
-                  type="number"
-                  value={activeBlock?.fontSize ?? 24}
-                  onChange={(e) => {
-                    if (!activeBlock) return;
-                    updateBlock(activeBlock.id, { fontSize: parseInt(e.target.value, 10) || 24 });
-                  }}
-                  className="h-11 bg-[var(--surface-subtle)]"
-                />
+                <div className="flex items-center gap-3 rounded-[var(--radius-md)] bg-[var(--surface-subtle)] px-3 py-2">
+                  <input
+                    type="range"
+                    min={MIN_DESIGN_FONT_SIZE}
+                    max={MAX_DESIGN_FONT_SIZE}
+                    step={1}
+                    value={selectedCharacter?.fontSize ?? 24}
+                    disabled={!selectedCharacter}
+                    onChange={(e) => {
+                      const next = clampFontSize(Number.parseInt(e.target.value, 10));
+                      if (!selectedCharacter) return;
+                      updateCharacter(selectedCharacter.id, { fontSize: next });
+                      markDirty();
+                    }}
+                    className="h-2 w-full cursor-pointer accent-[var(--accent-500)]"
+                  />
+                  <span className="w-10 text-right text-sm text-[var(--text-2)]">
+                    {selectedCharacter ? Math.round(selectedCharacter.fontSize) : '-'}
+                  </span>
+                </div>
               }
             />
             <FieldRow
@@ -322,7 +491,10 @@ export function DesignerPage() {
                 <Select
                   className="h-11 bg-[var(--surface-subtle)]"
                   value={selectedModuleId}
-                  onChange={(e) => setModule(e.target.value)}
+                  onChange={(e) => {
+                    setModule(e.target.value);
+                    markDirty();
+                  }}
                 >
                   {MODULE_CATALOG.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -346,45 +518,6 @@ export function DesignerPage() {
           </div>
         </aside>
       </main>
-
-      <Modal
-        title="Project details"
-        description="Project name is required before saving."
-        isOpen={projectDialogOpen}
-        onClose={() => setProjectDialogOpen(false)}
-      >
-        <div className="space-y-3">
-          <Input
-            label="Project name"
-            value={projectName}
-            onChange={(e) => setProjectName(e.target.value)}
-            required
-            error={!projectName.trim() ? 'Project name is required.' : undefined}
-          />
-          <Input
-            label="Description"
-            value={projectDescription}
-            onChange={(e) => setProjectDescription(e.target.value)}
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setProjectDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                if (!projectName.trim()) return;
-                await saveCurrentProject(projectName, projectDescription);
-                setProjectDialogOpen(false);
-                notify({ variant: 'success', title: 'Project saved' });
-              }}
-            >
-              Save project
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {editorCharId && <ManualDesignerPage />}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useProjectStore } from '../../data/store';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { ThemeToggleButton } from '../ui/ThemeToggleButton';
@@ -18,12 +17,12 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
   const navigate = useNavigate();
   const location = useLocation();
   const isDesignerRoute = location.pathname.startsWith('/projects/');
-  const editorCharId = useProjectStore((state) => state.editorCharId);
-  const showGlobalHeader = !editorCharId;
+  const isManualEditorRoute = location.pathname.includes('/manual/');
+  const isProjectDetailsRoute = isDesignerRoute && !isManualEditorRoute;
 
   return (
     <div className="min-h-screen text-[var(--text-1)]">
-      {showGlobalHeader && (
+      {!isManualEditorRoute && (
         <header className="sticky top-0 z-40 border-b border-[var(--border-1)] bg-[var(--header-bg)] backdrop-blur-md">
           <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 px-4 py-3 md:px-6">
             <div className="flex items-center gap-3">
@@ -49,9 +48,13 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
       )}
 
       <main
-        className={`mx-auto grid w-full max-w-[1680px] ${
-          showGlobalHeader ? 'min-h-[calc(100vh-76px)]' : 'min-h-screen'
-        } grid-cols-1 gap-4 px-4 py-4 md:px-6 ${
+        className={`mx-auto grid w-full ${
+          isManualEditorRoute
+            ? 'max-w-none gap-0 px-0 py-0 min-h-screen'
+            : isProjectDetailsRoute
+              ? 'max-w-none h-[calc(100vh-76px)] min-h-[calc(100vh-76px)] gap-0 px-0 py-0 overflow-hidden'
+              : 'max-w-[1680px] min-h-[calc(100vh-76px)] gap-4 px-4 py-4 md:px-6'
+        } grid-cols-1 ${
           isDesignerRoute ? '' : 'md:grid-cols-[220px_minmax(0,1fr)]'
         }`}
       >
@@ -79,7 +82,7 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
         <section
           className={
             isDesignerRoute
-              ? 'rounded-none border-0 bg-transparent p-0 shadow-none'
+              ? 'h-full min-h-0 rounded-none border-0 bg-transparent p-0 shadow-none overflow-hidden'
               : 'h-full rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-canvas)] p-4 shadow-[var(--shadow-sm)] md:p-6'
           }
         >

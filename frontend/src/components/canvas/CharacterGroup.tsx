@@ -1,25 +1,33 @@
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import type { CharacterPath } from '../../core/math/characterPaths';
+
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
 
 interface CharacterGroupProps {
   charPath: CharacterPath;
-  blockId: string;
+  charId: string;
   isSelected: boolean;
   onSelect: (charId: string, position: { x: number; y: number }) => void;
+  onDragStart?: (event: React.PointerEvent<SVGGElement>, charId: string) => void;
+  onResizeStart?: (
+    event: React.PointerEvent<SVGRectElement>,
+    charId: string,
+    handle: ResizeHandle
+  ) => void;
   pathRef?: (el: SVGPathElement | null, charId: string) => void;
 }
 
 export const CharacterGroup: React.FC<CharacterGroupProps> = ({
   charPath,
-  blockId,
+  charId,
   isSelected,
   onSelect,
+  onDragStart,
+  onResizeStart,
   pathRef,
 }) => {
   const pathElementRef = useRef<SVGPathElement>(null);
-  const charId = `${blockId}-${charPath.charIndex}`;
 
-  // Register path ref for LED placement
   useEffect(() => {
     if (pathRef && pathElementRef.current) {
       pathRef(pathElementRef.current, charId);
@@ -31,45 +39,44 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
     };
   }, [pathRef, charId]);
 
+  const bbox = useMemo(() => {
+    if (charPath.bbox) return charPath.bbox;
+    return {
+      x: charPath.x,
+      y: 0,
+      width: Math.max(12, charPath.width || 12),
+      height: 24,
+    };
+  }, [charPath]);
+
   const handleClick = useCallback(
     (e: React.MouseEvent<SVGGElement>) => {
       e.stopPropagation();
-      if (!charPath.pathData) return; // Skip spaces
-
-      // Get click position for panel placement
-      const svg = (e.target as SVGElement).closest('svg');
-      if (svg) {
-        // Calculate center of character in SVG coordinates
-        const bbox = pathElementRef.current?.getBBox();
-        if (bbox) {
-          onSelect(charId, {
-            x: bbox.x + bbox.width / 2,
-            y: bbox.y,
-          });
-        } else {
-          onSelect(charId, {
-            x: charPath.x + charPath.width / 2,
-            y: 0,
-          });
-        }
-      } else {
-        onSelect(charId, {
-          x: charPath.x + charPath.width / 2,
-          y: 0,
-        });
-      }
+      if (!charPath.pathData) return;
+      onSelect(charId, {
+        x: bbox.x + bbox.width / 2,
+        y: bbox.y,
+      });
     },
-    [charId, charPath, onSelect]
+    [bbox.x, bbox.y, bbox.width, charId, charPath.pathData, onSelect]
   );
 
-  // Skip rendering for spaces
   if (!charPath.pathData) {
     return null;
   }
 
   return (
-    <g onClick={handleClick} className="cursor-pointer" style={{ pointerEvents: 'all' }}>
-      {/* Selection highlight - rendered behind the letter */}
+    <g
+      onClick={handleClick}
+      onPointerDown={(event) => {
+        if (!isSelected || !onDragStart) return;
+        onDragStart(event, charId);
+      }}
+      className={isSelected ? 'cursor-move' : 'cursor-pointer'}
+      style={{ pointerEvents: 'all' }}
+      role="button"
+      aria-label={`Character ${charPath.char}`}
+    >
       {isSelected && (
         <path
           d={charPath.pathData}
@@ -82,7 +89,6 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
         />
       )}
 
-      {/* Main letter fill: monochrome black/white */}
       <path
         ref={pathElementRef}
         d={charPath.pathData}
@@ -93,7 +99,6 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
         className="transition-all duration-150"
       />
 
-      {/* Highlight overlay */}
       <path
         d={charPath.pathData}
         fill="none"
@@ -102,7 +107,6 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
         style={{ pointerEvents: 'none' }}
       />
 
-      {/* Hover highlight */}
       <path
         d={charPath.pathData}
         fill="rgba(15, 23, 42, 0)"
@@ -110,6 +114,33 @@ export const CharacterGroup: React.FC<CharacterGroupProps> = ({
         strokeWidth="4"
         className="hover:fill-[rgba(15,23,42,0.05)] transition-all duration-150"
       />
+
+      {isSelected && onResizeStart && (
+        <>
+          {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
+            const x = handle === 'nw' || handle === 'sw' ? bbox.x - 4 : bbox.x + bbox.width - 4;
+            const y = handle === 'nw' || handle === 'ne' ? bbox.y - 4 : bbox.y + bbox.height - 4;
+            return (
+              <rect
+                key={handle}
+                x={x}
+                y={y}
+                width={8}
+                height={8}
+                rx={2}
+                fill="#ffffff"
+                stroke="#2563eb"
+                strokeWidth={1.5}
+                style={{ cursor: 'nwse-resize' }}
+                onPointerDown={(event) => {
+                  event.stopPropagation();
+                  onResizeStart(event, charId, handle);
+                }}
+              />
+            );
+          })}
+        </>
+      )}
     </g>
   );
 };

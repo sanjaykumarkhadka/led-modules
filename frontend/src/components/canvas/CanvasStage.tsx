@@ -15,15 +15,24 @@ import {
 import { DimensionAnnotations } from './DimensionAnnotations';
 import { CharacterGroup } from './CharacterGroup';
 import {
-  generateCharacterPaths,
-  generateFallbackCharacterPaths,
+  generatePositionedCharacterPath,
   type CharacterPath,
 } from '../../core/math/characterPaths';
 import type { BoundingBox } from '../../core/math/dimensions';
 
-export const CanvasStage: React.FC = () => {
+const MIN_CHAR_SIZE = 8;
+const MAX_CHAR_SIZE = 96;
+
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
+
+interface CanvasStageProps {
+  onCharacterMutate?: () => void;
+}
+
+export const CanvasStage: React.FC<CanvasStageProps> = ({ onCharacterMutate }) => {
   const {
     blocks,
+    charactersByBlock,
     populateVersion,
     getCurrentModule,
     updateEngineeringData,
@@ -33,13 +42,13 @@ export const CanvasStage: React.FC = () => {
     ledCountOverrides,
     ledColumnOverrides,
     ledOrientationOverrides,
-    placementModeOverrides,
     manualLedOverrides,
     selectChar,
+    getCharacter,
+    updateCharacter,
     getCharLedCount,
     getCharLedColumns,
     getCharLedOrientation,
-    getCharPlacementMode,
     getCharManualLeds,
   } = useProjectStore();
 
@@ -51,45 +60,66 @@ export const CanvasStage: React.FC = () => {
 
   const prevVersionRef = useRef(populateVersion);
   const prevOverridesRef = useRef(ledCountOverrides);
+  const prevColumnOverridesRef = useRef(ledColumnOverrides);
+  const prevOrientationOverridesRef = useRef(ledOrientationOverrides);
+  const prevManualOverridesRef = useRef(manualLedOverrides);
 
-  // Get unique languages from all blocks
+  const dragRef = useRef<{
+    pointerId: number;
+    charId: string;
+    startPointer: { x: number; y: number };
+    startChar: { x: number; baselineY: number };
+    startBBox: BoundingBox;
+  } | null>(null);
+
+  const resizeRef = useRef<{
+    pointerId: number;
+    charId: string;
+    handle: ResizeHandle;
+    startPointer: { x: number; y: number };
+    startChar: { x: number; baselineY: number; fontSize: number };
+    startBBox: BoundingBox;
+  } | null>(null);
+
   const neededLanguages = useMemo(() => [...new Set(blocks.map((b) => b.language))], [blocks]);
-
-  // Load fonts for all needed languages
   const { fonts, loading } = useFonts(neededLanguages);
 
-  // Generate per-character paths for all blocks
   const blockCharPaths = useMemo((): BlockCharPaths[] => {
     return blocks.map((block) => {
-      const blockFont = fonts.get(block.language);
-      let charPaths: CharacterPath[];
-
-      if (blockFont && block.text) {
-        charPaths = generateCharacterPaths(block.text, blockFont, block.x, block.y, block.fontSize);
-      } else if (block.text) {
-        charPaths = generateFallbackCharacterPaths(block.text, block.x, block.y, block.fontSize);
-      } else {
-        charPaths = [];
-      }
-
+      const blockFont = fonts.get(block.language) ?? null;
+      const chars = [...(charactersByBlock[block.id] ?? [])].sort((a, b) => a.order - b.order);
+      const charPaths: CharacterPath[] = chars.map((char, index) => {
+        const positioned = generatePositionedCharacterPath(
+          char.glyph,
+          blockFont,
+          char.x,
+          char.baselineY,
+          char.fontSize,
+          char.id
+        );
+        return {
+          ...positioned,
+          charIndex: index,
+          charId: char.id,
+        };
+      });
       return {
         blockId: block.id,
         charPaths,
       };
     });
-  }, [fonts, blocks]);
+  }, [blocks, charactersByBlock, fonts]);
 
   const charPathMap = useMemo(() => {
     const map = new Map<string, CharacterPath>();
-    blockCharPaths.forEach(({ blockId, charPaths }) => {
+    blockCharPaths.forEach(({ charPaths }) => {
       charPaths.forEach((cp) => {
-        map.set(`${blockId}-${cp.charIndex}`, cp);
+        if (cp.charId) map.set(cp.charId, cp);
       });
     });
     return map;
   }, [blockCharPaths]);
 
-  // Register path refs for LED placement
   const registerPathRef = useCallback((el: SVGPathElement | null, charId: string) => {
     if (el) {
       pathRefs.current.set(charId, el);
@@ -118,37 +148,24 @@ export const CanvasStage: React.FC = () => {
       y: bbox.y + led.v * bbox.height,
       rotation: led.rotation,
       id: led.id,
+      ...(typeof led.scale === 'number' ? { scale: led.scale } : {}),
       source: 'manual' as const,
     };
   }, []);
 
-  // Handle character selection (position passed by CharacterGroup but not used here)
   const handleCharSelect = useCallback(
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    (charId: string, _position: { x: number; y: number }) => {
+    (charId: string) => {
       selectChar(charId);
     },
     [selectChar]
   );
 
-  // Handle clicking on background to deselect
   const handleBackgroundClick = useCallback(() => {
     if (selectedCharId) {
       selectChar(null);
     }
   }, [selectedCharId, selectChar]);
 
-  const prevColumnOverridesRef = useRef(ledColumnOverrides);
-  const prevOrientationOverridesRef = useRef(ledOrientationOverrides);
-  const prevManualOverridesRef = useRef(manualLedOverrides);
-  const prevPlacementModeOverridesRef = useRef(placementModeOverrides);
-  const showQA = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return new URLSearchParams(window.location.search).has('qa');
-  }, []);
-
-
-  // Generate LEDs per character
   useEffect(() => {
     const versionChanged = populateVersion !== prevVersionRef.current || populateVersion === 0;
     const overridesChanged = ledCountOverrides !== prevOverridesRef.current;
@@ -156,24 +173,16 @@ export const CanvasStage: React.FC = () => {
     const orientationOverridesChanged =
       ledOrientationOverrides !== prevOrientationOverridesRef.current;
     const manualOverridesChanged = manualLedOverrides !== prevManualOverridesRef.current;
-    const placementModeChanged =
-      placementModeOverrides !== prevPlacementModeOverridesRef.current;
 
     if (
       !versionChanged &&
       !overridesChanged &&
       !columnOverridesChanged &&
       !orientationOverridesChanged &&
-      !manualOverridesChanged &&
-      !placementModeChanged
+      !manualOverridesChanged
     )
       return;
-    if (
-      populateVersion === 0 &&
-      prevVersionRef.current === 0 &&
-      !manualOverridesChanged &&
-      !placementModeChanged
-    )
+    if (populateVersion === 0 && prevVersionRef.current === 0 && !manualOverridesChanged)
       return;
 
     prevVersionRef.current = populateVersion;
@@ -181,7 +190,6 @@ export const CanvasStage: React.FC = () => {
     prevColumnOverridesRef.current = ledColumnOverrides;
     prevOrientationOverridesRef.current = ledOrientationOverrides;
     prevManualOverridesRef.current = manualLedOverrides;
-    prevPlacementModeOverridesRef.current = placementModeOverrides;
 
     const currentModule = getCurrentModule();
     const visualPixelsPerInch = 12.5;
@@ -189,24 +197,16 @@ export const CanvasStage: React.FC = () => {
     if (svgRef.current && blockCharPaths.length > 0) {
       const allCharLeds: CharLEDData[] = [];
 
-      blockCharPaths.forEach(({ blockId, charPaths }) => {
+      blockCharPaths.forEach(({ charPaths }) => {
         charPaths.forEach((charPath) => {
-          if (!charPath.pathData) return; // Skip spaces
+          if (!charPath.pathData || !charPath.charId) return;
 
-          const charId = `${blockId}-${charPath.charIndex}`;
-          const placementMode = getCharPlacementMode(charId);
-
-          if (placementMode === 'manual') {
-            const bbox = charPath.bbox || getCharBBox(charId);
-            const manualLeds = getCharManualLeds(charId);
-            const positions =
-              bbox && manualLeds.length > 0
-                ? manualLeds.map((led) => toAbsoluteLED(led, bbox))
-                : [];
-            allCharLeds.push({
-              charId,
-              leds: positions,
-            });
+          const charId = charPath.charId;
+          const bbox = charPath.bbox || getCharBBox(charId);
+          const manualLeds = getCharManualLeds(charId);
+          if (bbox && manualLeds.length > 0) {
+            const positions = manualLeds.map((led) => toAbsoluteLED(led, bbox));
+            allCharLeds.push({ charId, leds: positions });
             return;
           }
 
@@ -214,7 +214,6 @@ export const CanvasStage: React.FC = () => {
           const columnCount = getCharLedColumns(charId);
           const orientation = getCharLedOrientation(charId);
 
-          // Create temp path for LED generation
           const tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
           tempPath.setAttribute('d', charPath.pathData);
           tempPath.style.visibility = 'hidden';
@@ -224,9 +223,9 @@ export const CanvasStage: React.FC = () => {
             targetModule: currentModule,
             strokeWidth: 2,
             pixelsPerInch: visualPixelsPerInch,
-            targetCount: targetCount,
-            columnCount: columnCount,
-            orientation: orientation,
+            targetCount,
+            columnCount,
+            orientation,
           });
 
           allCharLeds.push({
@@ -238,15 +237,9 @@ export const CanvasStage: React.FC = () => {
         });
       });
 
-      // This setState is intentionally triggered by user action (Populate button)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setCharLeds(allCharLeds);
-
-      // Update total count
+      queueMicrotask(() => setCharLeds(allCharLeds));
       const totalLeds = allCharLeds.reduce((sum, c) => sum + c.leds.length, 0);
       updateEngineeringData(totalLeds);
-
-      // Store layout data for PDF export
       useProjectStore.getState().setComputedLayoutData({
         blockCharPaths,
         charLeds: allCharLeds,
@@ -259,30 +252,25 @@ export const CanvasStage: React.FC = () => {
     ledColumnOverrides,
     ledOrientationOverrides,
     manualLedOverrides,
-    placementModeOverrides,
     getCurrentModule,
     updateEngineeringData,
     getCharLedCount,
     getCharLedColumns,
     getCharLedOrientation,
     getCharManualLeds,
-    getCharPlacementMode,
     getCharBBox,
     toAbsoluteLED,
   ]);
 
-  // Calculate bounding boxes for dimension annotations - synchronizing with SVG DOM
   useEffect(() => {
     if (!svgRef.current || blockCharPaths.length === 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLetterBboxes([]);
+      queueMicrotask(() => setLetterBboxes([]));
       return;
     }
 
     const bboxes: BoundingBox[] = [];
 
     blockCharPaths.forEach(({ charPaths }) => {
-      // Combine all character paths into one path for the block
       const combinedPath = charPaths
         .map((cp) => cp.pathData)
         .filter(Boolean)
@@ -305,13 +293,30 @@ export const CanvasStage: React.FC = () => {
       svgRef.current?.removeChild(tempPath);
     });
 
-    setLetterBboxes(bboxes);
+    queueMicrotask(() => setLetterBboxes(bboxes));
   }, [blockCharPaths]);
 
-  // Flatten all LEDs for rendering
   const allLeds = useMemo(() => {
     return charLeds.flatMap((c) => c.leds);
   }, [charLeds]);
+
+  const charScaleMap = useMemo(() => {
+    const baseFontSize = 150;
+    const map = new Map<string, number>();
+    Object.values(charactersByBlock).forEach((chars) => {
+      chars.forEach((char) => {
+        map.set(char.id, Math.max(0.05, Math.min(3, char.fontSize / baseFontSize)));
+      });
+    });
+    return map;
+  }, [charactersByBlock]);
+
+  const getCharVisualScale = useCallback(
+    (charId: string) => {
+      return charScaleMap.get(charId) ?? 1;
+    },
+    [charScaleMap]
+  );
 
   type QAResultItem = {
     charId: string;
@@ -321,15 +326,20 @@ export const CanvasStage: React.FC = () => {
   };
   const [qaResults, setQaResults] = useState<QAResultItem[]>([]);
 
+  const showQA = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return new URLSearchParams(window.location.search).has('qa');
+  }, []);
+
   useLayoutEffect(() => {
     if (!showQA) {
       queueMicrotask(() => setQaResults([]));
       return;
     }
     const charLabelMap = new Map<string, string>();
-    blockCharPaths.forEach(({ blockId, charPaths }) => {
+    blockCharPaths.forEach(({ charPaths }) => {
       charPaths.forEach((cp) => {
-        charLabelMap.set(`${blockId}-${cp.charIndex}`, cp.char || '');
+        if (cp.charId) charLabelMap.set(cp.charId, cp.char || '');
       });
     });
     const results: QAResultItem[] = [];
@@ -348,9 +358,8 @@ export const CanvasStage: React.FC = () => {
     queueMicrotask(() => setQaResults(results));
   }, [showQA, charLeds, blockCharPaths]);
 
-  // Calculate dynamic viewBox based on content bounds
   const viewBox = useMemo(() => {
-    const padding = 40; // Padding around content
+    const padding = 40;
     const minWidth = 800;
     const minHeight = 600;
 
@@ -358,10 +367,10 @@ export const CanvasStage: React.FC = () => {
       return { x: 0, y: 0, width: minWidth, height: minHeight };
     }
 
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
 
     blockCharPaths.forEach(({ charPaths }) => {
       charPaths.forEach((cp) => {
@@ -378,7 +387,6 @@ export const CanvasStage: React.FC = () => {
       return { x: 0, y: 0, width: minWidth, height: minHeight };
     }
 
-    // Add padding and ensure minimum size
     const contentWidth = maxX - minX + padding * 2;
     const contentHeight = maxY - minY + padding * 2;
 
@@ -389,6 +397,156 @@ export const CanvasStage: React.FC = () => {
       height: Math.max(minHeight, contentHeight + Math.abs(Math.min(0, minY - padding))),
     };
   }, [blockCharPaths]);
+
+  const getSvgPoint = useCallback((event: React.PointerEvent<SVGElement | SVGGElement>) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const transformed = point.matrixTransform(ctm.inverse());
+    return { x: transformed.x, y: transformed.y };
+  }, []);
+
+  const beginDrag = useCallback(
+    (event: React.PointerEvent<SVGGElement>, charId: string) => {
+      const point = getSvgPoint(event);
+      if (!point) return;
+      const char = getCharacter(charId);
+      const bbox = getCharBBox(charId);
+      if (!char || !bbox) return;
+      dragRef.current = {
+        pointerId: event.pointerId,
+        charId,
+        startPointer: point,
+        startChar: { x: char.x, baselineY: char.baselineY },
+        startBBox: bbox,
+      };
+      const svg = svgRef.current;
+      if (svg) svg.setPointerCapture(event.pointerId);
+    },
+    [getCharacter, getCharBBox, getSvgPoint]
+  );
+
+  const beginResize = useCallback(
+    (event: React.PointerEvent<SVGRectElement>, charId: string, handle: ResizeHandle) => {
+      const point = getSvgPoint(event);
+      if (!point) return;
+      const char = getCharacter(charId);
+      const bbox = getCharBBox(charId);
+      if (!char || !bbox) return;
+      resizeRef.current = {
+        pointerId: event.pointerId,
+        charId,
+        handle,
+        startPointer: point,
+        startChar: { x: char.x, baselineY: char.baselineY, fontSize: char.fontSize },
+        startBBox: bbox,
+      };
+      const svg = svgRef.current;
+      if (svg) svg.setPointerCapture(event.pointerId);
+    },
+    [getCharacter, getCharBBox, getSvgPoint]
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      const point = getSvgPoint(event);
+      if (!point) return;
+
+      const drag = dragRef.current;
+      if (drag && drag.pointerId === event.pointerId) {
+        const dx = point.x - drag.startPointer.x;
+        const dy = point.y - drag.startPointer.y;
+        const minDx = viewBox.x - drag.startBBox.x;
+        const maxDx = viewBox.x + viewBox.width - (drag.startBBox.x + drag.startBBox.width);
+        const minDy = viewBox.y - drag.startBBox.y;
+        const maxDy = viewBox.y + viewBox.height - (drag.startBBox.y + drag.startBBox.height);
+        const clampedDx = Math.max(minDx, Math.min(maxDx, dx));
+        const clampedDy = Math.max(minDy, Math.min(maxDy, dy));
+
+        updateCharacter(drag.charId, {
+          x: drag.startChar.x + clampedDx,
+          baselineY: drag.startChar.baselineY + clampedDy,
+        });
+        return;
+      }
+
+      const resize = resizeRef.current;
+      if (resize && resize.pointerId === event.pointerId) {
+        const dx = point.x - resize.startPointer.x;
+        const dy = point.y - resize.startPointer.y;
+        const base = Math.max(resize.startBBox.width, resize.startBBox.height, 1);
+        let delta = 0;
+        switch (resize.handle) {
+          case 'se':
+            delta = (dx + dy) / 2;
+            break;
+          case 'nw':
+            delta = (-dx - dy) / 2;
+            break;
+          case 'ne':
+            delta = (dx - dy) / 2;
+            break;
+          case 'sw':
+            delta = (-dx + dy) / 2;
+            break;
+        }
+
+        const nextFontSize = Math.max(
+          MIN_CHAR_SIZE,
+          Math.min(MAX_CHAR_SIZE, (resize.startChar.fontSize * (base + delta)) / base)
+        );
+        const scale = nextFontSize / resize.startChar.fontSize;
+        const targetWidth = resize.startBBox.width * scale;
+        const targetHeight = resize.startBBox.height * scale;
+
+        let targetBboxX = resize.startBBox.x;
+        let targetBboxY = resize.startBBox.y;
+
+        if (resize.handle === 'nw') {
+          targetBboxX = resize.startBBox.x + resize.startBBox.width - targetWidth;
+          targetBboxY = resize.startBBox.y + resize.startBBox.height - targetHeight;
+        } else if (resize.handle === 'ne') {
+          targetBboxY = resize.startBBox.y + resize.startBBox.height - targetHeight;
+        } else if (resize.handle === 'sw') {
+          targetBboxX = resize.startBBox.x + resize.startBBox.width - targetWidth;
+        }
+
+        targetBboxX = Math.max(viewBox.x, Math.min(viewBox.x + viewBox.width - targetWidth, targetBboxX));
+        targetBboxY = Math.max(viewBox.y, Math.min(viewBox.y + viewBox.height - targetHeight, targetBboxY));
+
+        const bboxDx = targetBboxX - resize.startBBox.x;
+        const bboxDy = targetBboxY - resize.startBBox.y;
+
+        updateCharacter(resize.charId, {
+          x: resize.startChar.x + bboxDx,
+          baselineY: resize.startChar.baselineY + bboxDy,
+          fontSize: nextFontSize,
+        });
+      }
+    },
+    [getSvgPoint, updateCharacter, viewBox]
+  );
+
+  const handlePointerUp = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      const svg = svgRef.current;
+      if (dragRef.current && dragRef.current.pointerId === event.pointerId) {
+        dragRef.current = null;
+        if (svg?.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+        onCharacterMutate?.();
+      }
+      if (resizeRef.current && resizeRef.current.pointerId === event.pointerId) {
+        resizeRef.current = null;
+        if (svg?.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+        onCharacterMutate?.();
+      }
+    },
+    [onCharacterMutate]
+  );
 
   if (loading) {
     return (
@@ -425,6 +583,8 @@ export const CanvasStage: React.FC = () => {
         preserveAspectRatio="xMidYMid meet"
         className="drop-shadow-2xl"
         onClick={handleBackgroundClick}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
       >
         <defs>
           <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
@@ -436,86 +596,71 @@ export const CanvasStage: React.FC = () => {
             />
           </pattern>
 
-          <filter id="ledGlowIntense" x="-150%" y="-150%" width="400%" height="400%">
-            <feGaussianBlur stdDeviation="3" result="blur1" />
-            <feGaussianBlur stdDeviation="6" result="blur2" />
-            <feMerge>
-              <feMergeNode in="blur2" />
-              <feMergeNode in="blur1" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-
           <filter id="letterShadow" x="-20%" y="-20%" width="140%" height="140%">
             <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#000" floodOpacity="0.5" />
           </filter>
-
-          <linearGradient id="metallic" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#f8fafc" />
-            <stop offset="50%" stopColor="#e2e8f0" />
-            <stop offset="100%" stopColor="#cbd5e1" />
-          </linearGradient>
-
-          <radialGradient id="ledCenter" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#60a5fa" />
-            <stop offset="70%" stopColor="#3b82f6" />
-            <stop offset="100%" stopColor="#2563eb" />
-          </radialGradient>
         </defs>
 
-        {/* Background */}
         <rect width="100%" height="100%" fill="var(--stage-bg)" />
         <rect width="100%" height="100%" fill="url(#grid)" />
 
-        {/* Per-character letter rendering */}
-        {blockCharPaths.map(({ blockId, charPaths }) =>
-          charPaths.map((charPath) => (
-            <CharacterGroup
-              key={`${blockId}-${charPath.charIndex}`}
-              charPath={charPath}
-              blockId={blockId}
-              isSelected={selectedCharId === `${blockId}-${charPath.charIndex}`}
-              onSelect={handleCharSelect}
-              pathRef={registerPathRef}
-            />
-          ))
+        {blockCharPaths.map(({ charPaths }) =>
+          charPaths.map((charPath) => {
+            const charId = charPath.charId ?? `${charPath.charIndex}`;
+            return (
+              <CharacterGroup
+                key={charId}
+                charPath={charPath}
+                charId={charId}
+                isSelected={selectedCharId === charId}
+                onSelect={handleCharSelect}
+                onDragStart={beginDrag}
+                onResizeStart={beginResize}
+                pathRef={registerPathRef}
+              />
+            );
+          })
         )}
 
-
-        {/* Dimension Annotations */}
         {showDimensions &&
           letterBboxes.map((bbox, i) => (
             <DimensionAnnotations key={`dim-${i}`} bbox={bbox} unit={dimensionUnit} />
           ))}
 
-        {/* LEDs - Capsule style with end dots */}
         {charLeds.map(({ charId, leds }) =>
           leds.map((led, i) => {
-            const isManual =
-              led.source === 'manual' && getCharPlacementMode(charId) === 'manual';
+            const isManual = led.source === 'manual';
+            const charScale = getCharVisualScale(charId);
+            const ledScale =
+              'scale' in led && typeof (led as { scale?: number }).scale === 'number'
+                ? (led as { scale?: number }).scale || 1
+                : 1;
+            const width = 12 * charScale * ledScale;
+            const height = 5 * charScale * ledScale;
+            const dotOffset = 3.5 * charScale * ledScale;
+            const dotRadius = Math.max(0.7, 1.2 * charScale * ledScale);
             const key = led.id ? `led-${led.id}` : `${charId}-${i}`;
 
             return (
               <g key={key} transform={`rotate(${led.rotation} ${led.x} ${led.y})`}>
                 <rect
-                  x={led.x - 6}
-                  y={led.y - 2.5}
-                  width={12}
-                  height={5}
-                  rx={2.5}
-                  ry={2.5}
+                  x={led.x - width / 2}
+                  y={led.y - height / 2}
+                  width={width}
+                  height={height}
+                  rx={height / 2}
+                  ry={height / 2}
                   fill="none"
                   stroke={isManual ? '#3b82f6' : '#94a3b8'}
                   strokeWidth={0.8}
                 />
-                <circle cx={led.x - 3.5} cy={led.y} r={1.2} fill="#64748b" />
-                <circle cx={led.x + 3.5} cy={led.y} r={1.2} fill="#64748b" />
+                <circle cx={led.x - dotOffset} cy={led.y} r={dotRadius} fill="#64748b" />
+                <circle cx={led.x + dotOffset} cy={led.y} r={dotRadius} fill="#64748b" />
               </g>
             );
           })
         )}
 
-        {/* Status Badge */}
         <g transform={`translate(${viewBox.x + 20}, ${viewBox.y + viewBox.height - 40})`}>
           <rect
             x="0"
@@ -539,45 +684,11 @@ export const CanvasStage: React.FC = () => {
             {allLeds.length} LEDs Placed
           </text>
         </g>
-
-        {/* Font Status */}
-        <g
-          transform={`translate(${viewBox.x + viewBox.width - 150}, ${viewBox.y + viewBox.height - 40})`}
-        >
-          <rect
-            x="0"
-            y="0"
-            width="130"
-            height="28"
-            rx="14"
-            fill={fonts.size > 0 ? 'rgba(34, 197, 94, 0.12)' : 'rgba(245, 158, 11, 0.14)'}
-            stroke={fonts.size > 0 ? '#16a34a' : '#d97706'}
-            strokeWidth="1"
-          />
-          <text
-            x="65"
-            y="18"
-            textAnchor="middle"
-            fill={fonts.size > 0 ? '#15803d' : '#92400e'}
-            fontSize="11"
-            fontFamily="system-ui"
-            fontWeight="500"
-          >
-            {fonts.size > 0
-              ? `${fonts.size} Font${fonts.size > 1 ? 's' : ''} Loaded`
-              : 'Fallback Mode'}
-          </text>
-        </g>
       </svg>
 
       {showQA && qaResults.length > 0 && (
         <div className="absolute top-3 right-3 z-50 max-w-[360px] bg-slate-950/90 border border-slate-700 rounded-lg p-3 text-xs text-slate-200">
           <div className="font-semibold text-sm mb-2">Placement QA</div>
-          <div className="text-[11px] text-slate-400 mb-2">
-            Thresholds: inside ≥ {DEFAULT_QUALITY_THRESHOLDS.insideRate}, nnCv ≤{' '}
-            {DEFAULT_QUALITY_THRESHOLDS.nnCv}, minClear ≥ {DEFAULT_QUALITY_THRESHOLDS.minClearance}
-            , symmetry ≥ {DEFAULT_QUALITY_THRESHOLDS.symmetryMean}
-          </div>
           <div className="space-y-2 max-h-[240px] overflow-auto pr-1">
             {qaResults.map((result) => (
               <div
@@ -594,17 +705,6 @@ export const CanvasStage: React.FC = () => {
                     {result.grade.pass ? 'PASS' : 'FAIL'}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-x-2 gap-y-1 mt-1 text-[11px] text-slate-300">
-                  <span>inside: {(result.quality.insideRate * 100).toFixed(0)}%</span>
-                  <span>nnCv: {result.quality.nnCv.toFixed(2)}</span>
-                  <span>minClear: {result.quality.minClearance.toFixed(2)}</span>
-                  <span>sym: {result.quality.symmetryMean.toFixed(2)}</span>
-                </div>
-                {!result.grade.pass && result.grade.failures.length > 0 && (
-                  <div className="mt-1 text-[10px] text-rose-200">
-                    {result.grade.failures.join(', ')}
-                  </div>
-                )}
               </div>
             ))}
           </div>

@@ -13,6 +13,16 @@ export interface TextBlock {
   language: string; // Per-block language for font selection
 }
 
+export interface CharacterEntity {
+  id: string;
+  glyph: string;
+  x: number;
+  baselineY: number;
+  fontSize: number;
+  language: string;
+  order: number;
+}
+
 export interface BlockCharPaths {
   blockId: string;
   charPaths: CharacterPath[];
@@ -37,11 +47,52 @@ export interface ComputedLayoutData {
   charLeds: CharLEDData[];
 }
 
+const CHAR_SPACING_RATIO = 0.76;
+
+function createId(prefix = 'char') {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function sortByOrder(chars: CharacterEntity[]) {
+  return [...chars].sort((a, b) => a.order - b.order);
+}
+
+function deriveTextFromCharacters(chars: CharacterEntity[]) {
+  return sortByOrder(chars)
+    .map((ch) => ch.glyph)
+    .join('');
+}
+
+function createCharactersFromBlock(block: TextBlock, oldCharacters: CharacterEntity[] = []): CharacterEntity[] {
+  const oldSorted = sortByOrder(oldCharacters);
+  const glyphs = Array.from(block.text || '');
+  const step = Math.max(1, block.fontSize * CHAR_SPACING_RATIO);
+
+  return glyphs.map((glyph, index) => {
+    const existing = oldSorted[index];
+    return {
+      id: existing?.id ?? createId(block.id),
+      glyph,
+      x: existing?.x ?? block.x + index * step,
+      baselineY: existing?.baselineY ?? block.y,
+      fontSize: existing?.fontSize ?? block.fontSize,
+      language: existing?.language ?? block.language,
+      order: index,
+    };
+  });
+}
+
 interface ProjectState {
   // Configuration
   blocks: TextBlock[];
   depthInches: number;
   selectedModuleId: string;
+
+  // Character entities (source of truth)
+  charactersByBlock: Record<string, CharacterEntity[]>;
 
   // UI State
   selectedBlockId: string | null;
@@ -51,16 +102,16 @@ interface ProjectState {
   dimensionUnit: 'mm' | 'in';
 
   // Per-character LED selection state
-  selectedCharId: string | null; // Format: "blockId-charIndex"
-  ledCountOverrides: Record<string, number>; // Per-character LED counts
-  defaultLedCount: number; // Default LED count per character
-  ledColumnOverrides: Record<string, number>; // Per-character column counts (1-5)
-  defaultLedColumns: number; // Default column count for new characters
-  ledOrientationOverrides: Record<string, 'horizontal' | 'vertical' | 'auto'>; // Per-character orientation
-  defaultLedOrientation: 'horizontal' | 'vertical' | 'auto'; // Default LED orientation
-  placementModeOverrides: Record<string, 'auto' | 'manual'>; // Per-character placement mode
-  defaultPlacementMode: 'auto' | 'manual'; // Default placement mode
-  manualLedOverrides: Record<string, ManualLED[]>; // Per-character manual LEDs (normalized)
+  selectedCharId: string | null;
+  ledCountOverrides: Record<string, number>;
+  defaultLedCount: number;
+  ledColumnOverrides: Record<string, number>;
+  defaultLedColumns: number;
+  ledOrientationOverrides: Record<string, 'horizontal' | 'vertical' | 'auto'>;
+  defaultLedOrientation: 'horizontal' | 'vertical' | 'auto';
+  placementModeOverrides: Record<string, 'auto' | 'manual'>;
+  defaultPlacementMode: 'auto' | 'manual';
+  manualLedOverrides: Record<string, ManualLED[]>;
 
   // Engineering Data (Calculated)
   totalModules: number;
@@ -75,11 +126,19 @@ interface ProjectState {
   updateBlock: (id: string, updates: Partial<TextBlock>) => void;
   removeBlock: (id: string) => void;
   selectBlock: (id: string | null) => void;
-  triggerPopulation: () => void; // New action
+  triggerPopulation: () => void;
 
   setDepth: (depth: number) => void;
   setModule: (moduleId: string) => void;
   updateEngineeringData: (count: number) => void;
+
+  // Character entity actions
+  initCharactersForBlock: (blockId: string) => void;
+  addCharacter: (blockId: string, glyph: string) => string | null;
+  removeCharacter: (blockId: string, charId: string) => void;
+  updateCharacter: (charId: string, updates: Partial<Omit<CharacterEntity, 'id'>>) => void;
+  reorderCharacters: (blockId: string, orderedIds: string[]) => void;
+  getCharacter: (charId: string) => CharacterEntity | null;
 
   // Dimension actions
   toggleDimensions: () => void;
@@ -127,17 +186,30 @@ interface ProjectState {
   getCurrentModule: () => LEDModule;
 }
 
+const initialBlock: TextBlock = {
+  id: '1',
+  text: 'HELLO',
+  x: 50,
+  y: 200,
+  fontSize: 150,
+  language: 'en',
+};
+
+const initialCharactersByBlock: Record<string, CharacterEntity[]> = {
+  [initialBlock.id]: createCharactersFromBlock(initialBlock),
+};
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
-  blocks: [{ id: '1', text: 'HELLO', x: 50, y: 200, fontSize: 150, language: 'en' }],
+  blocks: [initialBlock],
   depthInches: 5.0,
   selectedModuleId: 'tetra-max-medium-24v',
-  selectedBlockId: '1',
+  charactersByBlock: initialCharactersByBlock,
+  selectedBlockId: initialBlock.id,
   editorCharId: null,
   populateVersion: 0,
   showDimensions: true,
   dimensionUnit: 'mm',
 
-  // Per-character LED selection state
   selectedCharId: null,
   ledCountOverrides: {},
   defaultLedCount: 15,
@@ -158,41 +230,243 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   addBlock: () =>
     set((state) => {
-      const newId = Math.random().toString(36).substr(2, 9);
+      const newId = Math.random().toString(36).slice(2, 9);
       const lastBlock = state.blocks[state.blocks.length - 1];
       const newY = lastBlock ? lastBlock.y + lastBlock.fontSize + 20 : 200;
+      const block: TextBlock = {
+        id: newId,
+        text: 'NEW TEXT',
+        x: 50,
+        y: newY,
+        fontSize: 150,
+        language: 'en',
+      };
 
       return {
-        blocks: [
-          ...state.blocks,
-          { id: newId, text: 'NEW TEXT', x: 50, y: newY, fontSize: 150, language: 'en' },
-        ],
+        blocks: [...state.blocks, block],
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [newId]: createCharactersFromBlock(block),
+        },
         selectedBlockId: newId,
       };
     }),
 
   updateBlock: (id, updates) =>
-    set((state) => ({
-      blocks: state.blocks.map((b) => (b.id === id ? { ...b, ...updates } : b)),
-    })),
+    set((state) => {
+      const currentBlock = state.blocks.find((block) => block.id === id);
+      if (!currentBlock) return {};
+      const nextBlocks = state.blocks.map((block) => (block.id === id ? { ...block, ...updates } : block));
+      const updatedBlock = nextBlocks.find((block) => block.id === id);
+      if (!updatedBlock) return { blocks: nextBlocks };
+
+      const existingChars = state.charactersByBlock[id] ?? [];
+      let nextChars = existingChars;
+
+      if (typeof updates.text === 'string') {
+        nextChars = createCharactersFromBlock(updatedBlock, existingChars);
+      } else if (
+        updates.fontSize != null ||
+        updates.x != null ||
+        updates.y != null ||
+        updates.language != null
+      ) {
+        const xDelta = updates.x != null ? updates.x - currentBlock.x : 0;
+        const yDelta = updates.y != null ? updates.y - currentBlock.y : 0;
+        nextChars = existingChars.map((char) => ({
+          ...char,
+          x: char.x + xDelta,
+          baselineY: char.baselineY + yDelta,
+          fontSize: updates.fontSize ?? char.fontSize,
+          language: updates.language ?? char.language,
+        }));
+      }
+
+      return {
+        blocks: nextBlocks,
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [id]: nextChars,
+        },
+      };
+    }),
 
   removeBlock: (id) =>
-    set((state) => ({
-      blocks: state.blocks.filter((b) => b.id !== id),
-      selectedBlockId: state.selectedBlockId === id ? null : state.selectedBlockId,
-    })),
+    set((state) => {
+      const { [id]: _removedChars, ...restChars } = state.charactersByBlock;
+      void _removedChars;
+      return {
+        blocks: state.blocks.filter((b) => b.id !== id),
+        charactersByBlock: restChars,
+        selectedBlockId: state.selectedBlockId === id ? null : state.selectedBlockId,
+      };
+    }),
 
   selectBlock: (id) => set({ selectedBlockId: id }),
 
   setDepth: (depthInches) => set({ depthInches }),
   setModule: (selectedModuleId) => set({ selectedModuleId }),
 
+  initCharactersForBlock: (blockId) =>
+    set((state) => {
+      const block = state.blocks.find((b) => b.id === blockId);
+      if (!block) return {};
+      const current = state.charactersByBlock[blockId];
+      if (current && current.length > 0) return {};
+      return {
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [blockId]: createCharactersFromBlock(block),
+        },
+      };
+    }),
+
+  addCharacter: (blockId, glyph) => {
+    const normalized = Array.from(glyph.trim())[0];
+    if (!normalized) return null;
+
+    let createdId: string | null = null;
+    set((state) => {
+      const block = state.blocks.find((b) => b.id === blockId);
+      if (!block) return {};
+      const current = sortByOrder(state.charactersByBlock[blockId] ?? []);
+      const last = current[current.length - 1];
+      const nextOrder = current.length;
+      const nextFontSize = last?.fontSize ?? block.fontSize;
+      const nextX = last ? last.x + last.fontSize * CHAR_SPACING_RATIO : block.x;
+      const nextY = last?.baselineY ?? block.y;
+      const id = createId(blockId);
+      createdId = id;
+      const nextChars = [
+        ...current,
+        {
+          id,
+          glyph: normalized,
+          x: nextX,
+          baselineY: nextY,
+          fontSize: nextFontSize,
+          language: block.language,
+          order: nextOrder,
+        },
+      ];
+
+      return {
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [blockId]: nextChars,
+        },
+        blocks: state.blocks.map((b) =>
+          b.id === blockId
+            ? {
+                ...b,
+                text: deriveTextFromCharacters(nextChars),
+              }
+            : b
+        ),
+      };
+    });
+    return createdId;
+  },
+
+  removeCharacter: (blockId, charId) =>
+    set((state) => {
+      const current = sortByOrder(state.charactersByBlock[blockId] ?? []);
+      const nextChars = current
+        .filter((char) => char.id !== charId)
+        .map((char, index) => ({ ...char, order: index }));
+
+      return {
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [blockId]: nextChars,
+        },
+        selectedCharId: state.selectedCharId === charId ? null : state.selectedCharId,
+        blocks: state.blocks.map((b) =>
+          b.id === blockId
+            ? {
+                ...b,
+                text: deriveTextFromCharacters(nextChars),
+              }
+            : b
+        ),
+      };
+    }),
+
+  updateCharacter: (charId, updates) =>
+    set((state) => {
+      const nextCharactersByBlock: Record<string, CharacterEntity[]> = {};
+      let changedBlockId: string | null = null;
+
+      Object.entries(state.charactersByBlock).forEach(([blockId, chars]) => {
+        let changed = false;
+        const nextChars = chars.map((char) => {
+          if (char.id !== charId) return char;
+          changed = true;
+          return {
+            ...char,
+            ...updates,
+          };
+        });
+        if (changed) changedBlockId = blockId;
+        nextCharactersByBlock[blockId] = nextChars;
+      });
+
+      if (!changedBlockId) return {};
+
+      return {
+        charactersByBlock: nextCharactersByBlock,
+        blocks: state.blocks.map((b) =>
+          b.id === changedBlockId
+            ? {
+                ...b,
+                text: deriveTextFromCharacters(nextCharactersByBlock[changedBlockId] ?? []),
+              }
+            : b
+        ),
+      };
+    }),
+
+  reorderCharacters: (blockId, orderedIds) =>
+    set((state) => {
+      const current = state.charactersByBlock[blockId] ?? [];
+      if (current.length === 0) return {};
+      const byId = new Map(current.map((char) => [char.id, char]));
+      const ordered = orderedIds
+        .map((id) => byId.get(id))
+        .filter((char): char is CharacterEntity => Boolean(char));
+      const leftovers = current.filter((char) => !orderedIds.includes(char.id));
+      const nextChars = [...ordered, ...leftovers].map((char, index) => ({ ...char, order: index }));
+
+      return {
+        charactersByBlock: {
+          ...state.charactersByBlock,
+          [blockId]: nextChars,
+        },
+        blocks: state.blocks.map((b) =>
+          b.id === blockId
+            ? {
+                ...b,
+                text: deriveTextFromCharacters(nextChars),
+              }
+            : b
+        ),
+      };
+    }),
+
+  getCharacter: (charId) => {
+    const allBlocks = Object.values(get().charactersByBlock);
+    for (const chars of allBlocks) {
+      const found = chars.find((char) => char.id === charId);
+      if (found) return found;
+    }
+    return null;
+  },
+
   toggleDimensions: () => set((state) => ({ showDimensions: !state.showDimensions })),
   setDimensionUnit: (dimensionUnit) => set({ dimensionUnit }),
   openEditor: (charId) => set({ editorCharId: charId }),
   closeEditor: () => set({ editorCharId: null }),
 
-  // Character LED selection actions
   selectChar: (charId) => set({ selectedCharId: charId }),
 
   setCharLedCount: (charId, count) =>
@@ -204,7 +478,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       const source = state.ledCountOverrides ?? {};
       const { [charId]: _removed, ...rest } = source;
-      void _removed; // Intentionally unused - we're removing this key
+      void _removed;
       return { ledCountOverrides: rest };
     }),
 
@@ -215,7 +489,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return state.ledCountOverrides?.[charId] ?? state.defaultLedCount;
   },
 
-  // Column count actions
   setCharLedColumns: (charId, columns) =>
     set((state) => ({
       ledColumnOverrides: { ...(state.ledColumnOverrides ?? {}), [charId]: columns },
@@ -225,7 +498,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       const source = state.ledColumnOverrides ?? {};
       const { [charId]: _removed, ...rest } = source;
-      void _removed; // Intentionally unused - we're removing this key
+      void _removed;
       return { ledColumnOverrides: rest };
     }),
 
@@ -234,7 +507,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return state.ledColumnOverrides?.[charId] ?? state.defaultLedColumns;
   },
 
-  // Orientation actions
   setCharLedOrientation: (charId, orientation) =>
     set((state) => ({
       ledOrientationOverrides: {
@@ -247,7 +519,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => {
       const source = state.ledOrientationOverrides ?? {};
       const { [charId]: _removed, ...rest } = source;
-      void _removed; // Intentionally unused - we're removing this key
+      void _removed;
       return { ledOrientationOverrides: rest };
     }),
 
@@ -328,8 +600,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateEngineeringData: (count: number) => {
     const module = get().getCurrentModule();
     const totalPower = count * module.wattsPerModule;
-
-    // Find best PSU (Simple logic: first one that fits with 20% headroom)
     const safeLoad = totalPower * 1.2;
     const psu = PSU_CATALOG.find((p) => p.maxWatts >= safeLoad) || null;
 

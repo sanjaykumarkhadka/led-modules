@@ -6,6 +6,7 @@ import { Input } from './components/ui/Input';
 import { AppLayout } from './components/layout/AppLayout';
 import { ProjectsOverviewPage } from './pages/ProjectsOverviewPage';
 import { DesignerPage } from './pages/DesignerPage';
+import { ManualEditorRoutePage } from './pages/ManualEditorRoutePage';
 import { useAuthStore } from './state/authStore';
 import { ThemeToggleButton } from './components/ui/ThemeToggleButton';
 
@@ -112,6 +113,7 @@ function App() {
       <Routes>
         <Route path="/" element={<ProjectsOverviewPage />} />
         <Route path="/projects/:projectId" element={<DesignerPage />} />
+        <Route path="/projects/:projectId/manual/:charId" element={<ManualEditorRoutePage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </AppLayout>
