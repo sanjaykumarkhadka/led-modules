@@ -23,7 +23,12 @@ import {
   resolveShapePath,
   type CharacterShapeOverride,
 } from '../../core/math/shapeWarp';
-import { buildEditablePathPoints, moveEditablePathPoint, type EditablePathPoint } from '../../core/math/pathEditor';
+import {
+  buildEditableAnchorPoints,
+  moveEditableAnchorPointSafe,
+  type EditablePathPoint,
+} from '../../core/math/pathEditor';
+import { validatePathEdit } from '../../core/math/pathSafety';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
@@ -120,6 +125,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const groupSpacingRef = useRef(1);
+  const lastShapeBlockToastAtRef = useRef(0);
+  const lastValidShapePathRef = useRef<string | null>(null);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
   const seededViewportCharIdRef = useRef<string | null>(null);
   useEffect(() => {
@@ -250,6 +257,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     );
     queueMicrotask(() => {
       setDraftShapeOverride(persisted);
+      lastValidShapePathRef.current = persisted.outerPath ?? '';
       setSelectedShapePointId(null);
     });
   }, [baseBBox, baseCharPath?.pathData, editorCharId, getCharShapeOverride]);
@@ -272,7 +280,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     if (editorMode !== 'shape') return [];
     const pathData = draftShapeOverride?.outerPath || renderedPath?.pathData || '';
     if (!pathData) return [];
-    return buildEditablePathPoints(pathData);
+    return buildEditableAnchorPoints(pathData);
   }, [draftShapeOverride?.outerPath, editorMode, renderedPath?.pathData]);
 
   const bbox = renderedPath?.bbox || baseBBox || null;
@@ -1324,6 +1332,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   const handleUpdateShapePoint = useCallback(
     (pointId: string, point: { x: number; y: number }) => {
+      let blockedReason: string | undefined;
       setDraftShapeOverride((prev) => {
         const sourcePath = prev?.outerPath || renderedPath?.pathData || '';
         if (!sourcePath) return prev;
@@ -1334,17 +1343,37 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
               y: clamp(point.y, bounds.y, bounds.y + bounds.height),
             }
           : point;
-        const updated = moveEditablePathPoint(sourcePath, pointId, clampedPoint);
+        const updated = moveEditableAnchorPointSafe(sourcePath, pointId, clampedPoint, {
+          bounds,
+          validate: validatePathEdit,
+        });
+        if (!updated.accepted) {
+          blockedReason = updated.reason;
+          return prev;
+        }
         const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
         if (!nextBBox) return prev;
+        lastValidShapePathRef.current = updated.pathData;
         return createPathShapeOverride(updated.pathData, nextBBox, prev?.sourceType ?? 'custom_path');
       });
+      if (blockedReason) {
+        const now = Date.now();
+        if (now - lastShapeBlockToastAtRef.current > 700) {
+          notify({
+            variant: 'error',
+            title: 'Move blocked',
+            description: 'This move would create an invalid shape.',
+          });
+          lastShapeBlockToastAtRef.current = now;
+        }
+      }
     },
-    [baseBBox, fixedLocalBounds, localBounds, renderedPath?.pathData]
+    [baseBBox, fixedLocalBounds, localBounds, notify, renderedPath?.pathData]
   );
 
   const handleResetShape = useCallback(() => {
     if (!baseCharPath || !baseBBox) return;
+    lastValidShapePathRef.current = baseCharPath.pathData;
     setDraftShapeOverride(createPathShapeOverride(baseCharPath.pathData, baseBBox, 'font_glyph'));
     setSelectedShapePointId(null);
   }, [baseBBox, baseCharPath]);
@@ -1369,6 +1398,19 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     const oldWarped = resolveShapePath(baseCharPath.pathData, persistedShape, baseBBox);
     const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox, oldWarped.pathData);
     const nextWarped = resolveShapePath(baseCharPath.pathData, nextShape, baseBBox);
+    const saveValidation = validatePathEdit(
+      lastValidShapePathRef.current || oldWarped.pathData,
+      nextWarped.pathData,
+      fixedLocalBounds ?? localBounds ?? baseBBox
+    );
+    if (!saveValidation.ok) {
+      notify({
+        variant: 'error',
+        title: 'Cannot save shape',
+        description: 'Shape geometry is invalid. Reset or adjust anchor points.',
+      });
+      return;
+    }
     const oldBBox = oldWarped.bbox;
     const newBBox = nextWarped.bbox;
     const safeW = Math.max(1e-6, newBBox.width);
@@ -1392,6 +1434,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     setIsDirty(true);
     setEditorMode('module');
     setSelectedShapePointId(null);
+    lastValidShapePathRef.current = nextWarped.pathData;
 
     try {
       await commitCharacterShapeOverride(accessToken, projectId, editorCharId, nextShape, remapped);

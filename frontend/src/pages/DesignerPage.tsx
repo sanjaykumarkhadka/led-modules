@@ -16,6 +16,27 @@ const CHARACTER_OPTIONS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 type SyncState = 'synced' | 'pending' | 'syncing' | 'error';
 
+function PencilIconSmall() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
+
+function TrashIconSmall() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
+    </svg>
+  );
+}
+
 function pruneOverrideKeys(removedCharIds: Set<string>) {
   if (removedCharIds.size === 0) return;
   useProjectStore.setState((state) => {
@@ -44,7 +65,6 @@ export function DesignerPage() {
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [newCharacter, setNewCharacter] = useState('A');
-  const [depthInput, setDepthInput] = useState('5');
   const [syncState, setSyncState] = useState<SyncState>('synced');
 
   const autosaveInFlightRef = useRef(false);
@@ -58,14 +78,12 @@ export function DesignerPage() {
   const {
     blocks,
     charactersByBlock,
-    depthInches,
     selectedModuleId,
     totalModules,
     totalPowerWatts,
     recommendedPSU,
     selectedCharId,
     selectChar,
-    setDepth,
     setModule,
     addCharacter,
     removeCharacter,
@@ -106,10 +124,6 @@ export function DesignerPage() {
       setProjectDescription(existing.description || '');
     });
   }, [projectId, projects]);
-
-  useEffect(() => {
-    setDepthInput(String(depthInches));
-  }, [depthInches]);
 
   useEffect(() => {
     if (characters.length === 0) {
@@ -193,21 +207,6 @@ export function DesignerPage() {
       description: projectsError,
     });
   }, [notify, projectsError]);
-
-  const applyDepthFromInput = useCallback(
-    (value: string) => {
-      const parsed = Number.parseFloat(value);
-      if (!Number.isFinite(parsed)) {
-        setDepthInput(String(depthInches));
-        return;
-      }
-      const clamped = Math.min(12, Math.max(1, parsed));
-      setDepth(clamped);
-      setDepthInput(String(clamped));
-      markDirty();
-    },
-    [depthInches, markDirty, setDepth]
-  );
 
   const syncLabel =
     syncState === 'syncing'
@@ -301,54 +300,85 @@ export function DesignerPage() {
                 return (
                   <div
                     key={char.id}
-                    className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 ${
+                    className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 transition-colors ${
                       selected
-                        ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
-                        : 'border-zinc-700 bg-zinc-900 text-zinc-300'
+                        ? 'border-zinc-500 bg-zinc-800/95 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
+                        : 'border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/80'
                     }`}
                   >
-                    <button type="button" onClick={() => selectChar(char.id)} className="text-sm">
-                      {char.glyph}
-                    </button>
-                    {projectId && projectId !== 'new' && (
-                      <button
-                        type="button"
-                        aria-label="Open manual editor"
-                        title="Open manual editor"
-                        onClick={() => navigate(`/projects/${projectId}/manual/${char.id}`)}
-                        className="text-xs hover:text-[var(--text-1)]"
-                        
-                      >
-                        ✎
-                      </button>
-                    )}
                     <button
                       type="button"
-                      aria-label="Remove character"
-                      title="Remove character"
-                      onClick={() => handleRemoveCharacter(char.id)}
-                      className="text-xs hover:text-[var(--danger-500)]"
+                      onClick={() => selectChar(char.id)}
+                      className="rounded px-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80"
                     >
-                      ×
+                      {char.glyph}
                     </button>
+                    <div className="ml-1 flex items-center gap-1 border-l border-zinc-700 pl-1">
+                      {projectId && projectId !== 'new' && (
+                        <button
+                          type="button"
+                          aria-label={`Edit character ${char.glyph} in manual editor`}
+                          title="Edit character"
+                          onClick={() => navigate(`/projects/${projectId}/manual/${char.id}`)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-600 bg-zinc-900 text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80"
+                        >
+                          <PencilIconSmall />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-label={`Delete character ${char.glyph}`}
+                        title="Delete character"
+                        onClick={() => handleRemoveCharacter(char.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-rose-700/70 bg-rose-950/30 text-rose-300 transition-colors hover:border-rose-600 hover:bg-rose-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/80"
+                      >
+                        <TrashIconSmall />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div className="flex items-center gap-2">
-              <Select
-                value={newCharacter}
-                onChange={(e) => setNewCharacter(e.target.value)}
-                className="h-9 bg-[var(--surface-subtle)]"
+            <div
+              className="space-y-2 rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-900/50 p-3"
+              role="group"
+              aria-label="Add Character"
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                  Add Character
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-300">
+                  <span className="text-zinc-500">Selected</span>
+                  <span className="font-semibold text-zinc-100">{newCharacter}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {CHARACTER_OPTIONS.map((char) => {
+                  const isSelected = newCharacter === char;
+                  return (
+                    <button
+                      key={char}
+                      type="button"
+                      aria-label={`Add character ${char}`}
+                      onClick={() => setNewCharacter(char)}
+                      className={`h-8 rounded-md border text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80 ${
+                        isSelected
+                          ? 'border-blue-500/70 bg-blue-600/20 text-blue-100'
+                          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {char}
+                    </button>
+                  );
+                })}
+              </div>
+              <Button
+                size="sm"
+                onClick={handleAddCharacter}
+                className="h-9 w-full border-blue-500/40 bg-blue-600/90 text-white hover:bg-blue-500"
               >
-                {CHARACTER_OPTIONS.map((char) => (
-                  <option key={char} value={char}>
-                    {char}
-                  </option>
-                ))}
-              </Select>
-              <Button size="sm" variant="outline" onClick={handleAddCharacter} className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
-                Add
+                Add Character
               </Button>
             </div>
           </div>
@@ -394,30 +424,6 @@ export function DesignerPage() {
                 <Select className="h-11 bg-[var(--surface-subtle)]">
                   <option>72 - Black - 7</option>
                 </Select>
-              }
-            />
-            <FieldRow
-              label="Depth"
-              control={
-                <Input
-                  type="text"
-                  inputMode="decimal"
-                  pattern="^[0-9]*[.]?[0-9]*$"
-                  value={depthInput}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    if (/^\d*\.?\d*$/.test(next)) setDepthInput(next);
-                  }}
-                  onBlur={(e) => applyDepthFromInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      applyDepthFromInput((e.currentTarget as HTMLInputElement).value);
-                      (e.currentTarget as HTMLInputElement).blur();
-                    }
-                  }}
-                  className="h-11 bg-[var(--surface-subtle)]"
-                />
               }
             />
             <FieldRow

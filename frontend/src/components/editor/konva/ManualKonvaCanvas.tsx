@@ -140,6 +140,8 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
     center: { x: number; y: number };
     startAngleDeg: number;
   } | null>(null);
+  const shapeDragRafRef = useRef<number | null>(null);
+  const pendingShapeDragRef = useRef<{ id: string; point: { x: number; y: number } } | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -177,6 +179,16 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [setIsPanning]);
+
+  useEffect(() => {
+    return () => {
+      if (shapeDragRafRef.current != null) {
+        cancelAnimationFrame(shapeDragRafRef.current);
+        shapeDragRafRef.current = null;
+      }
+      pendingShapeDragRef.current = null;
+    };
+  }, []);
 
   const scale = useMemo(() => {
     const sx = size.width / Math.max(1, viewBox.width);
@@ -797,36 +809,13 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
 
           {shapePoints.length > 0 && (
             <Group x={-pathOffset.x} y={-pathOffset.y}>
-              {shapePoints.map((point) => {
+              {shapePoints
+                .filter((point) => point.kind === 'anchor')
+                .map((point) => {
                 const selected = selectedShapePointId === point.id;
-                const radius =
-                  point.kind === 'anchor'
-                    ? selected
-                      ? 2.5
-                      : 2.1
-                    : selected
-                      ? 2.2
-                      : 1.8;
-                const fill =
-                  point.kind === 'anchor'
-                    ? selected
-                      ? '#2563eb'
-                      : '#f8fafc'
-                    : selected
-                      ? '#38bdf8'
-                      : isDark
-                        ? '#94a3b8'
-                        : '#64748b';
-                const stroke =
-                  point.kind === 'anchor'
-                    ? selected
-                      ? '#f8fafc'
-                      : '#2563eb'
-                    : selected
-                      ? '#f8fafc'
-                      : isDark
-                        ? '#38bdf8'
-                        : '#0ea5e9';
+                const radius = selected ? 2.9 : 2.5;
+                const fill = selected ? '#2563eb' : '#f8fafc';
+                const stroke = selected ? '#f8fafc' : '#2563eb';
                 return (
                   <Circle
                     key={point.id}
@@ -841,9 +830,34 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                       if (editorMode !== 'shape') return;
                       onSelectShapePoint(point.id);
                     }}
+                    onDragStart={() => {
+                      if (editorMode !== 'shape') return;
+                      onSelectShapePoint(point.id);
+                    }}
                     onDragMove={(evt) => {
                       if (editorMode !== 'shape') return;
                       const pos = evt.target.position();
+                      pendingShapeDragRef.current = {
+                        id: point.id,
+                        point: { x: pos.x, y: pos.y },
+                      };
+                      if (shapeDragRafRef.current != null) return;
+                      shapeDragRafRef.current = requestAnimationFrame(() => {
+                        const pending = pendingShapeDragRef.current;
+                        shapeDragRafRef.current = null;
+                        pendingShapeDragRef.current = null;
+                        if (!pending) return;
+                        onUpdateShapePoint(pending.id, pending.point);
+                      });
+                    }}
+                    onDragEnd={(evt) => {
+                      if (editorMode !== 'shape') return;
+                      if (shapeDragRafRef.current != null) {
+                        cancelAnimationFrame(shapeDragRafRef.current);
+                        shapeDragRafRef.current = null;
+                      }
+                      const pos = evt.target.position();
+                      pendingShapeDragRef.current = null;
                       onUpdateShapePoint(point.id, { x: pos.x, y: pos.y });
                     }}
                   />

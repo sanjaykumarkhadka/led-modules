@@ -17,6 +17,13 @@ export interface EditablePathPoint {
   yValueIndex: number;
 }
 
+export interface MoveEditableAnchorPointSafeResult {
+  accepted: boolean;
+  reason?: import('./pathSafety').PathEditRejectReason;
+  pathData: string;
+  points: EditablePathPoint[];
+}
+
 const TOKEN_RE = /([a-zA-Z])|([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/g;
 
 function fmt(value: number) {
@@ -324,6 +331,10 @@ export function buildEditablePathPoints(pathData: string) {
   return buildEditablePointsFromSegments(segments);
 }
 
+export function buildEditableAnchorPoints(pathData: string) {
+  return buildEditablePathPoints(pathData).filter((point) => point.kind === 'anchor');
+}
+
 export function moveEditablePathPoint(pathData: string, pointId: string, next: { x: number; y: number }) {
   const segments = parsePathToAbsoluteSegments(pathData);
   const points = buildEditablePointsFromSegments(segments);
@@ -344,5 +355,80 @@ export function moveEditablePathPoint(pathData: string, pointId: string, next: {
   return {
     pathData: updatedPath,
     points: buildEditablePathPoints(updatedPath),
+  };
+}
+
+function translateIncomingControl(segment: Segment, point: EditablePathPoint, dx: number, dy: number) {
+  if (point.kind !== 'anchor') return;
+  if (segment.cmd === 'C' && point.xValueIndex === 4 && point.yValueIndex === 5) {
+    segment.values[2] += dx;
+    segment.values[3] += dy;
+    return;
+  }
+  if (segment.cmd === 'Q' && point.xValueIndex === 2 && point.yValueIndex === 3) {
+    segment.values[0] += dx;
+    segment.values[1] += dy;
+  }
+}
+
+function translateOutgoingControl(nextSegment: Segment | undefined, dx: number, dy: number) {
+  if (!nextSegment) return;
+  if (nextSegment.cmd === 'C' || nextSegment.cmd === 'Q') {
+    nextSegment.values[0] += dx;
+    nextSegment.values[1] += dy;
+  }
+}
+
+export function moveEditableAnchorPointSafe(
+  pathData: string,
+  pointId: string,
+  next: { x: number; y: number },
+  options?: {
+    bounds?: { x: number; y: number; width: number; height: number };
+    validate?: (
+      previousPath: string,
+      candidatePath: string,
+      bounds?: { x: number; y: number; width: number; height: number }
+    ) => { ok: boolean; reason?: import('./pathSafety').PathEditRejectReason };
+  }
+): MoveEditableAnchorPointSafeResult {
+  const segments = parsePathToAbsoluteSegments(pathData);
+  const points = buildEditablePointsFromSegments(segments);
+  const point = points.find((p) => p.id === pointId);
+  if (!point || point.kind !== 'anchor') {
+    return { accepted: false, reason: 'degenerate_segment', pathData, points: buildEditableAnchorPoints(pathData) };
+  }
+  const segment = segments[point.segmentIndex];
+  if (!segment) {
+    return { accepted: false, reason: 'degenerate_segment', pathData, points: buildEditableAnchorPoints(pathData) };
+  }
+
+  const currentX = segment.values[point.xValueIndex];
+  const currentY = segment.values[point.yValueIndex];
+  const dx = next.x - currentX;
+  const dy = next.y - currentY;
+
+  translateIncomingControl(segment, point, dx, dy);
+  segment.values[point.xValueIndex] = next.x;
+  segment.values[point.yValueIndex] = next.y;
+  translateOutgoingControl(segments[point.segmentIndex + 1], dx, dy);
+
+  const candidatePath = serializeSegments(segments);
+  if (options?.validate) {
+    const verdict = options.validate(pathData, candidatePath, options.bounds);
+    if (!verdict.ok) {
+      return {
+        accepted: false,
+        reason: verdict.reason,
+        pathData,
+        points: buildEditableAnchorPoints(pathData),
+      };
+    }
+  }
+
+  return {
+    accepted: true,
+    pathData: candidatePath,
+    points: buildEditableAnchorPoints(candidatePath),
   };
 }
