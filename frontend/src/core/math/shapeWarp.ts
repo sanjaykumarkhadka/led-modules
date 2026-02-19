@@ -10,9 +10,18 @@ export interface MeshGrid {
 }
 
 export interface CharacterShapeOverride {
-  version: 1;
-  baseBBox: { x: number; y: number; width: number; height: number };
-  mesh: MeshGrid;
+  // v2 path-native geometry
+  version?: number;
+  outerPath?: string;
+  holes?: string[];
+  units?: 'mm' | 'in';
+  bbox?: { x: number; y: number; width: number; height: number };
+  sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+  constraints?: { minStrokeWidthMm?: number; minChannelWidthMm?: number };
+
+  // v1 mesh warp fallback (legacy compatibility)
+  baseBBox?: { x: number; y: number; width: number; height: number };
+  mesh?: MeshGrid;
 }
 
 export interface WarpedPathResult {
@@ -55,6 +64,32 @@ function commandArity(cmd: string) {
     default:
       return 0;
   }
+}
+
+export function hasPathGeometry(shape: CharacterShapeOverride | undefined | null): boolean {
+  return Boolean(shape?.outerPath && shape.outerPath.trim().length > 0);
+}
+
+export function composeCharacterShapePath(shape: CharacterShapeOverride): string {
+  const outer = shape.outerPath?.trim() ?? '';
+  if (!outer) return '';
+  const holes = (shape.holes ?? []).map((h) => h.trim()).filter(Boolean);
+  return holes.length > 0 ? `${outer} ${holes.join(' ')}` : outer;
+}
+
+export function createPathShapeOverride(
+  pathData: string,
+  bbox: { x: number; y: number; width: number; height: number },
+  sourceType: 'font_glyph' | 'svg_import' | 'custom_path' = 'custom_path',
+): CharacterShapeOverride {
+  return {
+    version: 2,
+    outerPath: pathData,
+    holes: [],
+    units: 'mm',
+    bbox: { ...bbox },
+    sourceType,
+  };
 }
 
 export function createIdentityShapeOverride(
@@ -126,7 +161,7 @@ export function warpPathDataWithOverride(
   shape: CharacterShapeOverride
 ): WarpedPathResult {
   if (!pathData || !shape?.mesh?.points?.length) {
-    const base = shape?.baseBBox ?? { x: 0, y: 0, width: 0, height: 0 };
+    const base = shape?.baseBBox ?? shape?.bbox ?? { x: 0, y: 0, width: 0, height: 0 };
     return { pathData, bbox: base };
   }
 
@@ -153,7 +188,7 @@ export function warpPathDataWithOverride(
   };
 
   const warpXY = (x: number, y: number) => {
-    const p = warpPointWithMesh({ x, y }, shape.baseBBox, shape.mesh);
+    const p = warpPointWithMesh({ x, y }, shape.baseBBox ?? shape.bbox ?? { x: 0, y: 0, width: 0, height: 0 }, shape.mesh!);
     pushBBox(p.x, p.y);
     return p;
   };
@@ -241,7 +276,7 @@ export function warpPathDataWithOverride(
     }
   }
 
-  const fallbackBBox = shape.baseBBox;
+  const fallbackBBox = shape.baseBBox ?? shape.bbox ?? { x: 0, y: 0, width: 0, height: 0 };
   return {
     pathData: out || pathData,
     bbox:
@@ -279,28 +314,63 @@ export function pathBBoxFromPathData(pathData: string) {
   }
 }
 
-export function normalizeShapeOverride(
+export function resolveShapePath(
+  basePathData: string,
   shape: CharacterShapeOverride | undefined,
   fallbackBBox: { x: number; y: number; width: number; height: number }
-) {
-  if (!shape) return createIdentityShapeOverride(fallbackBBox);
-  const mesh = shape.mesh;
-  if (
-    !mesh ||
-    mesh.rows < 2 ||
-    mesh.cols < 2 ||
-    !Array.isArray(mesh.points) ||
-    mesh.points.length !== mesh.rows * mesh.cols
-  ) {
-    return createIdentityShapeOverride(fallbackBBox);
+): WarpedPathResult {
+  if (shape && hasPathGeometry(shape)) {
+    const pathData = composeCharacterShapePath(shape);
+    const bbox = pathBBoxFromPathData(pathData) ?? shape.bbox ?? fallbackBBox;
+    return { pathData, bbox };
   }
-  return {
-    version: 1 as const,
-    baseBBox: shape.baseBBox ?? fallbackBBox,
-    mesh: {
-      rows: mesh.rows,
-      cols: mesh.cols,
-      points: mesh.points.map((p) => ({ x: p.x, y: p.y })),
-    },
-  };
+  if (shape?.mesh) {
+    return warpPathDataWithOverride(basePathData, shape);
+  }
+  const bbox = pathBBoxFromPathData(basePathData) ?? fallbackBBox;
+  return { pathData: basePathData, bbox };
+}
+
+export function normalizeShapeOverride(
+  shape: CharacterShapeOverride | undefined,
+  fallbackBBox: { x: number; y: number; width: number; height: number },
+  fallbackPathData?: string
+) {
+  if (shape && hasPathGeometry(shape)) {
+    const pathData = composeCharacterShapePath(shape);
+    const bbox = shape.bbox ?? pathBBoxFromPathData(pathData) ?? fallbackBBox;
+    return {
+      version: 2,
+      outerPath: shape.outerPath ?? pathData,
+      holes: shape.holes ?? [],
+      units: shape.units ?? 'mm',
+      bbox,
+      sourceType: shape.sourceType ?? 'custom_path',
+      ...(shape.constraints ? { constraints: shape.constraints } : {}),
+    } as CharacterShapeOverride;
+  }
+
+  const mesh = shape?.mesh;
+  if (
+    mesh &&
+    mesh.rows >= 2 &&
+    mesh.cols >= 2 &&
+    Array.isArray(mesh.points) &&
+    mesh.points.length === mesh.rows * mesh.cols
+  ) {
+    return {
+      version: 1,
+      baseBBox: shape?.baseBBox ?? fallbackBBox,
+      mesh: {
+        rows: mesh.rows,
+        cols: mesh.cols,
+        points: mesh.points.map((p) => ({ x: p.x, y: p.y })),
+      },
+    } as CharacterShapeOverride;
+  }
+
+  if (fallbackPathData) {
+    return createPathShapeOverride(fallbackPathData, fallbackBBox, 'font_glyph');
+  }
+  return createIdentityShapeOverride(fallbackBBox);
 }

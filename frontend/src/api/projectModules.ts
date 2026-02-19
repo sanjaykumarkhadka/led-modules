@@ -5,8 +5,10 @@ export interface CharacterModuleDto {
   id: string;
   projectId: string;
   characterId: string;
-  u: number;
-  v: number;
+  u?: number;
+  v?: number;
+  x?: number;
+  y?: number;
   rotation: number;
   scale?: number;
 }
@@ -29,8 +31,10 @@ export async function replaceCharacterModules(
     body: {
       modules: modules.map((m) => ({
         id: m.id,
-        u: m.u,
-        v: m.v,
+        ...(m.u != null ? { u: m.u } : {}),
+        ...(m.v != null ? { v: m.v } : {}),
+        ...(m.x != null ? { x: m.x } : {}),
+        ...(m.y != null ? { y: m.y } : {}),
         rotation: m.rotation,
         ...(m.scale != null ? { scale: m.scale } : {}),
       })),

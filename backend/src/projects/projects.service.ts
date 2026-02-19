@@ -347,21 +347,34 @@ export class ProjectsService {
     projectId: string,
     characterId: string,
     payload: {
-      version: number;
-      baseBBox: { x: number; y: number; width: number; height: number };
-      mesh: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
+      version?: number;
+      outerPath?: string;
+      holes?: string[];
+      units?: 'mm' | 'in';
+      bbox?: { x: number; y: number; width: number; height: number };
+      sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+      constraints?: { minStrokeWidthMm?: number; minChannelWidthMm?: number };
+      baseBBox?: { x: number; y: number; width: number; height: number };
+      mesh?: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
     },
   ) {
     const project = await this.assertProjectOwned(userId, projectId);
+    const setPayload: Record<string, unknown> = {
+      version: payload.version ?? 2,
+    };
+    if (payload.outerPath != null) setPayload.outerPath = payload.outerPath;
+    if (payload.holes != null) setPayload.holes = payload.holes;
+    if (payload.units != null) setPayload.units = payload.units;
+    if (payload.bbox != null) setPayload.bbox = payload.bbox;
+    if (payload.sourceType != null) setPayload.sourceType = payload.sourceType;
+    if (payload.constraints != null) setPayload.constraints = payload.constraints;
+    if (payload.baseBBox != null) setPayload.baseBBox = payload.baseBBox;
+    if (payload.mesh != null) setPayload.mesh = payload.mesh;
     return this.shapeOverrideModel
       .findOneAndUpdate(
         { projectId: project._id, characterId },
         {
-          $set: {
-            version: payload.version,
-            baseBBox: payload.baseBBox,
-            mesh: payload.mesh,
-          },
+          $set: setPayload,
         },
         { returnDocument: 'after', upsert: true },
       )
@@ -387,7 +400,15 @@ export class ProjectsService {
     userId: string,
     projectId: string,
     characterId: string,
-    modules: Array<{ id: string; u: number; v: number; rotation: number; scale?: number }>,
+    modules: Array<{
+      id: string;
+      u?: number;
+      v?: number;
+      x?: number;
+      y?: number;
+      rotation: number;
+      scale?: number;
+    }>,
   ) {
     const project = await this.assertProjectOwned(userId, projectId);
     await this.withOptionalTransaction(async (session) => {
@@ -401,8 +422,10 @@ export class ProjectsService {
           id: m.id,
           projectId: project._id,
           characterId,
-          u: m.u,
-          v: m.v,
+          u: m.u ?? 0,
+          v: m.v ?? 0,
+          ...(m.x != null ? { x: m.x } : {}),
+          ...(m.y != null ? { y: m.y } : {}),
           rotation: m.rotation,
           ...(m.scale != null ? { scale: m.scale } : {}),
         }));
@@ -414,6 +437,83 @@ export class ProjectsService {
       }
     });
     return this.listModules(userId, projectId, characterId);
+  }
+
+  async commitShapeWithModules(
+    userId: string,
+    projectId: string,
+    characterId: string,
+    shape: {
+      version?: number;
+      outerPath?: string;
+      holes?: string[];
+      units?: 'mm' | 'in';
+      bbox?: { x: number; y: number; width: number; height: number };
+      sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+      constraints?: { minStrokeWidthMm?: number; minChannelWidthMm?: number };
+      baseBBox?: { x: number; y: number; width: number; height: number };
+      mesh?: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
+    },
+    modules: Array<{
+      id: string;
+      u?: number;
+      v?: number;
+      x?: number;
+      y?: number;
+      rotation: number;
+      scale?: number;
+    }>,
+  ) {
+    const project = await this.assertProjectOwned(userId, projectId);
+    await this.withOptionalTransaction(async (session) => {
+      const shapeSetPayload: Record<string, unknown> = {
+        version: shape.version ?? 2,
+      };
+      if (shape.outerPath != null) shapeSetPayload.outerPath = shape.outerPath;
+      if (shape.holes != null) shapeSetPayload.holes = shape.holes;
+      if (shape.units != null) shapeSetPayload.units = shape.units;
+      if (shape.bbox != null) shapeSetPayload.bbox = shape.bbox;
+      if (shape.sourceType != null) shapeSetPayload.sourceType = shape.sourceType;
+      if (shape.constraints != null) shapeSetPayload.constraints = shape.constraints;
+      if (shape.baseBBox != null) shapeSetPayload.baseBBox = shape.baseBBox;
+      if (shape.mesh != null) shapeSetPayload.mesh = shape.mesh;
+
+      const shapeQuery = this.shapeOverrideModel.findOneAndUpdate(
+        { projectId: project._id, characterId },
+        { $set: shapeSetPayload },
+        { returnDocument: 'after', upsert: true },
+      );
+      if (session) shapeQuery.session(session);
+      await shapeQuery.exec();
+
+      const deleteModulesQuery = this.moduleModel.deleteMany({ projectId: project._id, characterId });
+      if (session) deleteModulesQuery.session(session);
+      await deleteModulesQuery.exec();
+
+      if (modules.length > 0) {
+        const docs = modules.map((m) => ({
+          id: m.id,
+          projectId: project._id,
+          characterId,
+          u: m.u ?? 0,
+          v: m.v ?? 0,
+          ...(m.x != null ? { x: m.x } : {}),
+          ...(m.y != null ? { y: m.y } : {}),
+          rotation: m.rotation,
+          ...(m.scale != null ? { scale: m.scale } : {}),
+        }));
+        if (session) {
+          await this.moduleModel.insertMany(docs, { session });
+        } else {
+          await this.moduleModel.insertMany(docs);
+        }
+      }
+    });
+
+    return {
+      shape: await this.getShapeOverride(userId, projectId, characterId),
+      modules: await this.listModules(userId, projectId, characterId),
+    };
   }
 
   async listAllCharacterOverrides(userId: string, projectId: string) {

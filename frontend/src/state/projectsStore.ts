@@ -87,8 +87,10 @@ async function hydrateProjectGraph(accessToken: string, projectId: string) {
     const list = manualLedOverrides[m.characterId] ?? [];
     list.push({
       id: m.id,
-      u: m.u,
-      v: m.v,
+      u: m.u ?? 0,
+      v: m.v ?? 0,
+      ...(m.x != null ? { x: m.x } : {}),
+      ...(m.y != null ? { y: m.y } : {}),
       rotation: m.rotation,
       ...(m.scale != null ? { scale: m.scale } : {}),
     });
@@ -98,9 +100,15 @@ async function hydrateProjectGraph(accessToken: string, projectId: string) {
   const charShapeOverrides: Record<string, ReturnType<typeof useProjectStore.getState>['getCharShapeOverride'] extends (id: string) => infer T ? NonNullable<T> : never> = {};
   for (const s of shapes) {
     charShapeOverrides[s.characterId] = {
-      version: 1,
-      baseBBox: s.baseBBox,
-      mesh: s.mesh,
+      version: s.version ?? 2,
+      ...(s.outerPath != null ? { outerPath: s.outerPath } : {}),
+      ...(s.holes != null ? { holes: s.holes } : {}),
+      ...(s.units != null ? { units: s.units } : {}),
+      ...(s.bbox != null ? { bbox: s.bbox } : {}),
+      ...(s.sourceType != null ? { sourceType: s.sourceType } : {}),
+      ...(s.constraints != null ? { constraints: s.constraints } : {}),
+      ...(s.baseBBox != null ? { baseBBox: s.baseBBox } : {}),
+      ...(s.mesh != null ? { mesh: s.mesh } : {}),
     };
   }
 
@@ -228,9 +236,30 @@ async function syncNormalizedGraph(accessToken: string, projectId: string) {
       .map((c) => deleteProjectCharacter(accessToken, projectId, c.id))
   );
 
+  const charBBoxes = new Map<string, { x: number; y: number; width: number; height: number }>();
+  state.computedLayoutData?.blockCharPaths.forEach(({ charPaths }) => {
+    charPaths.forEach((cp) => {
+      if (!cp.charId) return;
+      if (!cp.bbox) return;
+      charBBoxes.set(cp.charId, cp.bbox);
+    });
+  });
+
   for (const charId of nextCharIds) {
     const modules = state.manualLedOverrides[charId] ?? [];
-    await replaceCharacterModules(accessToken, projectId, charId, modules);
+    const bbox = charBBoxes.get(charId);
+    const withLocalCoords = modules.map((m) => ({
+      ...m,
+      ...(m.x != null && m.y != null
+        ? { x: m.x, y: m.y }
+        : bbox
+          ? {
+              x: bbox.x + m.u * bbox.width,
+              y: bbox.y + m.v * bbox.height,
+            }
+          : {}),
+    }));
+    await replaceCharacterModules(accessToken, projectId, charId, withLocalCoords);
   }
 
   const existingShapes = await listProjectShapeOverrides(accessToken, projectId);

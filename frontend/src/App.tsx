@@ -33,6 +33,21 @@ function App() {
     });
   }, [authError, notify]);
 
+  useEffect(() => {
+    const handler = () => {
+      logout();
+      notify({
+        variant: 'error',
+        title: 'Session expired',
+        description: 'Please log in again.',
+      });
+    };
+    window.addEventListener('auth:unauthorized', handler as EventListener);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handler as EventListener);
+    };
+  }, [logout, notify]);
+
   const handleAuthSubmit = async (nextEmail: string, nextPassword: string) => {
     setEmail(nextEmail);
     setPassword(nextPassword);

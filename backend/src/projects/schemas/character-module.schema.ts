@@ -18,6 +18,12 @@ export class CharacterModule extends Document {
   @Prop({ type: Number, required: true })
   v: number;
 
+  @Prop({ type: Number })
+  x?: number;
+
+  @Prop({ type: Number })
+  y?: number;
+
   @Prop({ type: Number, required: true, default: 0 })
   rotation: number;
 

@@ -19,7 +19,7 @@ import { USE_KONVA_DESIGNER_STAGE } from '../../config/featureFlags';
 import {
   createIdentityShapeOverride,
   normalizeShapeOverride,
-  warpPathDataWithOverride,
+  resolveShapePath,
 } from '../../core/math/shapeWarp';
 
 interface CanvasStageProps {
@@ -91,7 +91,7 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({ onCharacterMutate }) =
         const shape =
           normalizeShapeOverride(charShapeOverrides[char.id], fallbackBBox) ??
           createIdentityShapeOverride(fallbackBBox);
-        const warped = warpPathDataWithOverride(positioned.pathData, shape);
+        const warped = resolveShapePath(positioned.pathData, shape, fallbackBBox);
         return {
           ...positioned,
           charIndex: index,
@@ -149,9 +149,11 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({ onCharacterMutate }) =
   );
 
   const toAbsoluteLED = useCallback((led: ManualLED, bbox: BoundingBox) => {
+    const x = led.x != null ? led.x : bbox.x + led.u * bbox.width;
+    const y = led.y != null ? led.y : bbox.y + led.v * bbox.height;
     return {
-      x: bbox.x + led.u * bbox.width,
-      y: bbox.y + led.v * bbox.height,
+      x,
+      y,
       rotation: led.rotation,
       id: led.id,
       ...(typeof led.scale === 'number' ? { scale: led.scale } : {}),

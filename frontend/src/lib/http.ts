@@ -12,6 +12,15 @@ export interface RequestOptions {
   signal?: AbortSignal;
 }
 
+function emitAuthUnauthorized(status: number) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(
+    new CustomEvent('auth:unauthorized', {
+      detail: { status },
+    }),
+  );
+}
+
 function getErrorMessage(data: unknown, status: number) {
   if (typeof data === 'object' && data !== null && 'message' in data) {
     const message = (data as { message?: unknown }).message;
@@ -46,6 +55,9 @@ export async function http<TResponse>(
   const data = text ? (JSON.parse(text) as unknown) : null;
 
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      emitAuthUnauthorized(response.status);
+    }
     const error: HttpError = Object.assign(
       new Error(getErrorMessage(data, response.status)),
       {

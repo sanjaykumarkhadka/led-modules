@@ -38,6 +38,8 @@ export interface ManualLED {
   id: string;
   u: number;
   v: number;
+  x?: number;
+  y?: number;
   rotation: number;
   /** Uniform scale; base size is 12×5. Default 1. Keeps module shape fixed. */
   scale?: number;

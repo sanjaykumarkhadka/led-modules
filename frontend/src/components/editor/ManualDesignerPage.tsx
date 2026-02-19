@@ -11,16 +11,20 @@ import { isCapsuleInside } from '../../core/math/geometry';
 import { useToast } from '../ui/ToastProvider';
 import { useConfirm } from '../ui/ConfirmProvider';
 import { useProjectsStore } from '../../state/projectsStore';
+import { useAuthStore } from '../../state/authStore';
 import { createShapeGeometryAdapter } from './geometry/shapeGeometryAdapter';
 import { ManualKonvaCanvas } from './konva/ManualKonvaCanvas';
 import { USE_KONVA_MANUAL_EDITOR } from '../../config/featureFlags';
 import { MAX_LED_SCALE, MIN_LED_SCALE } from '../canvas/konva/editorPolicies';
 import {
-  createIdentityShapeOverride,
+  createPathShapeOverride,
   normalizeShapeOverride,
-  warpPathDataWithOverride,
+  pathBBoxFromPathData,
+  resolveShapePath,
   type CharacterShapeOverride,
 } from '../../core/math/shapeWarp';
+import { buildEditablePathPoints, moveEditablePathPoint, type EditablePathPoint } from '../../core/math/pathEditor';
+import { commitCharacterShapeOverride } from '../../api/projectShapes';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
@@ -102,15 +106,22 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const selectOnly = useCallback((id: string) => setSelectedLedIds(new Set([id])), []);
   const [viewBox, setViewBox] = useState<ViewBox | null>(null);
   const [baseViewBox, setBaseViewBox] = useState<ViewBox | null>(null);
+  const [fixedLocalBounds, setFixedLocalBounds] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [invalidLedIds, setInvalidLedIds] = useState<Set<string>>(new Set());
   const [draftShapeOverride, setDraftShapeOverride] = useState<CharacterShapeOverride | null>(null);
-  const [selectedMeshPointIndex, setSelectedMeshPointIndex] = useState<number | null>(null);
+  const [selectedShapePointId, setSelectedShapePointId] = useState<string | null>(null);
   const [groupSpacing, setGroupSpacing] = useState(1);
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const groupSpacingRef = useRef(1);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
+  const seededViewportCharIdRef = useRef<string | null>(null);
   useEffect(() => {
     selectedLedIdsRef.current = selectedLedIds;
   }, [selectedLedIds]);
@@ -232,19 +243,37 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   useEffect(() => {
     if (!editorCharId || !baseBBox) return;
-    const persisted = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
+    const persisted = normalizeShapeOverride(
+      getCharShapeOverride(editorCharId) ?? undefined,
+      baseBBox,
+      baseCharPath?.pathData
+    );
     queueMicrotask(() => {
       setDraftShapeOverride(persisted);
-      setSelectedMeshPointIndex(null);
+      setSelectedShapePointId(null);
     });
-  }, [baseBBox, editorCharId, getCharShapeOverride]);
+  }, [baseBBox, baseCharPath?.pathData, editorCharId, getCharShapeOverride]);
 
   const renderedPath = useMemo(() => {
     if (!baseCharPath || !baseBBox) return null;
-    const persisted = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
-    const active = editorMode === 'shape' ? normalizeShapeOverride(draftShapeOverride ?? undefined, baseBBox) : persisted;
-    return warpPathDataWithOverride(baseCharPath.pathData, active);
+    const persisted = normalizeShapeOverride(
+      getCharShapeOverride(editorCharId) ?? undefined,
+      baseBBox,
+      baseCharPath.pathData
+    );
+    const active =
+      editorMode === 'shape'
+        ? normalizeShapeOverride(draftShapeOverride ?? undefined, baseBBox, persisted.outerPath ?? baseCharPath.pathData)
+        : persisted;
+    return resolveShapePath(baseCharPath.pathData, active, baseBBox);
   }, [baseBBox, baseCharPath, draftShapeOverride, editorCharId, editorMode, getCharShapeOverride]);
+
+  const editableShapePoints = useMemo<EditablePathPoint[]>(() => {
+    if (editorMode !== 'shape') return [];
+    const pathData = draftShapeOverride?.outerPath || renderedPath?.pathData || '';
+    if (!pathData) return [];
+    return buildEditablePathPoints(pathData);
+  }, [draftShapeOverride?.outerPath, editorMode, renderedPath?.pathData]);
 
   const bbox = renderedPath?.bbox || baseBBox || null;
   const [pathBounds, setPathBounds] = useState<{
@@ -286,15 +315,26 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   }, [renderedPath?.pathData, editorCharId]);
 
   useEffect(() => {
+    seededViewportCharIdRef.current = null;
+    setFixedLocalBounds(null);
+    setBaseViewBox(null);
+    setViewBox(null);
+  }, [editorCharId]);
+
+  useEffect(() => {
     const source = pathBounds || bbox;
-    if (!source) return;
+    if (!source || !editorCharId) return;
     const local = { x: 0, y: 0, width: source.width, height: source.height };
     const base = expandBox(local);
-    queueMicrotask(() => {
-      setBaseViewBox(base);
-      setViewBox(base);
-    });
-  }, [bbox, pathBounds]);
+    if (seededViewportCharIdRef.current !== editorCharId || !fixedLocalBounds) {
+      seededViewportCharIdRef.current = editorCharId;
+      queueMicrotask(() => {
+        setFixedLocalBounds(local);
+        setBaseViewBox(base);
+        setViewBox(base);
+      });
+    }
+  }, [bbox, editorCharId, fixedLocalBounds, pathBounds]);
 
   const clampViewBoxToBase = useCallback(
     (next: ViewBox) => {
@@ -342,7 +382,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   }, [viewBox, clampViewBoxToBase]);
 
   const localBounds = useMemo(() => {
-    const source = pathBounds || bbox;
+    const source = fixedLocalBounds || pathBounds || bbox;
     if (!source) return null;
     return {
       x: 0,
@@ -350,7 +390,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       width: source.width,
       height: source.height,
     };
-  }, [bbox, pathBounds]);
+  }, [bbox, fixedLocalBounds, pathBounds]);
 
   const pathTransform = useMemo(() => {
     const source = pathBounds || bbox;
@@ -395,10 +435,12 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           2;
       const w = BASE_LED_WIDTH * scale * charVisualScale;
       const h = BASE_LED_HEIGHT * scale * charVisualScale;
+      const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
+      const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
       return {
         ...led,
-        x: localBounds.x + led.u * localBounds.width,
-        y: localBounds.y + led.v * localBounds.height,
+        x,
+        y,
         w,
         h,
         scale,
@@ -526,6 +568,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         id: createLedId(),
         u: normalized.u,
         v: normalized.v,
+        x: snapped.x,
+        y: snapped.y,
         rotation,
         ...(scale != null && scale !== 1 && { scale }),
       };
@@ -601,6 +645,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
             ...led,
             u: isGroupDrag ? nu : clamp01(nu),
             v: isGroupDrag ? nv : clamp01(nv),
+            x: localBounds.x + (isGroupDrag ? nu : clamp01(nu)) * localBounds.width,
+            y: localBounds.y + (isGroupDrag ? nv : clamp01(nv)) * localBounds.height,
           };
         })
       );
@@ -772,7 +818,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
             const { u, v } = toManualUnclamped({ x: newX, y: newY });
             let newRotation = startRot + deltaDeg;
             newRotation = ((newRotation % 360) + 360) % 360;
-            return { ...led, u, v, rotation: newRotation };
+            return { ...led, u, v, x: newX, y: newY, rotation: newRotation };
           })
         );
       }
@@ -969,10 +1015,14 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       for (const led of selected) {
         const nu = led.u + offset / localBounds.width;
         const nv = led.v + offset / localBounds.height;
+        const clampedU = isGroup ? nu : clamp01(nu);
+        const clampedV = isGroup ? nv : clamp01(nv);
         newLeds.push({
           id: createLedId(),
-          u: isGroup ? nu : clamp01(nu),
-          v: isGroup ? nv : clamp01(nv),
+          u: clampedU,
+          v: clampedV,
+          x: localBounds.x + clampedU * localBounds.width,
+          y: localBounds.y + clampedV * localBounds.height,
           rotation: led.rotation,
           ...(led.scale != null && led.scale !== 1 && { scale: led.scale }),
         });
@@ -1062,13 +1112,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         const centerY =
           selectedAbsoluteLeds.reduce((sum, led) => sum + led.y, 0) / selectedAbsoluteLeds.length;
         const factor = spacingOrFactor;
-        const updates = new Map<string, { u: number; v: number }>();
+        const updates = new Map<string, { u: number; v: number; x: number; y: number }>();
         for (const led of selectedAbsoluteLeds) {
           const x = centerX + (led.x - centerX) * factor;
           const y = centerY + (led.y - centerY) * factor;
           updates.set(led.id, {
             u: (x - localBounds.x) / localBounds.width,
             v: (y - localBounds.y) / localBounds.height,
+            x,
+            y,
           });
         }
         setDraftLeds((prev) =>
@@ -1084,12 +1136,14 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           sorted.reduce((sum, led) => sum + led.w, 0) + (sorted.length - 1) * spacingOrFactor;
         let x = alignBounds.centerX - totalWidth / 2;
         const y = alignBounds.centerY;
-        const updates = new Map<string, { u: number; v: number }>();
+        const updates = new Map<string, { u: number; v: number; x: number; y: number }>();
         for (const led of sorted) {
           x += led.w / 2;
           updates.set(led.id, {
             u: clamp01((x - localBounds.x) / localBounds.width),
             v: clamp01((y - localBounds.y) / localBounds.height),
+            x,
+            y,
           });
           x += led.w / 2 + spacingOrFactor;
         }
@@ -1106,12 +1160,14 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           sorted.reduce((sum, led) => sum + led.h, 0) + (sorted.length - 1) * spacingOrFactor;
         let y = alignBounds.centerY - totalHeight / 2;
         const x = alignBounds.centerX;
-        const updates = new Map<string, { u: number; v: number }>();
+        const updates = new Map<string, { u: number; v: number; x: number; y: number }>();
         for (const led of sorted) {
           y += led.h / 2;
           updates.set(led.id, {
             u: clamp01((x - localBounds.x) / localBounds.width),
             v: clamp01((y - localBounds.y) / localBounds.height),
+            x,
+            y,
           });
           y += led.h / 2 + spacingOrFactor;
         }
@@ -1207,7 +1263,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         a.y === b.y ? a.x - b.x : a.y - b.y
       );
 
-      const updates = new Map<string, { u: number; v: number }>();
+      const updates = new Map<string, { u: number; v: number; x: number; y: number }>();
 
       ordered.forEach((led, index) => {
         const row = Math.floor(index / cols);
@@ -1218,6 +1274,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         updates.set(led.id, {
           u: clamp01((x - localBounds.x) / localBounds.width),
           v: clamp01((y - localBounds.y) / localBounds.height),
+          x,
+          y,
         });
       });
 
@@ -1245,8 +1303,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       if (!pathEl) return failedIds;
 
       for (const led of leds) {
-        const x = localBounds.x + led.u * localBounds.width;
-        const y = localBounds.y + led.v * localBounds.height;
+        const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
+        const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
         const rotation = led.rotation ?? 0;
         if (!isCapsuleInside(pathEl, x, y, rotation, 6 * charVisualScale)) {
           failedIds.add(led.id);
@@ -1264,37 +1322,53 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     }
   }, [draftLeds, invalidLedIds.size]);
 
-  const handleUpdateMeshPoint = useCallback((index: number, point: { x: number; y: number }) => {
-    setDraftShapeOverride((prev) => {
-      if (!prev) return prev;
-      if (index < 0 || index >= prev.mesh.points.length) return prev;
-      const points = prev.mesh.points.map((p, i) => (i === index ? { x: point.x, y: point.y } : p));
-      return {
-        ...prev,
-        mesh: {
-          ...prev.mesh,
-          points,
-        },
-      };
-    });
-  }, []);
+  const handleUpdateShapePoint = useCallback(
+    (pointId: string, point: { x: number; y: number }) => {
+      setDraftShapeOverride((prev) => {
+        const sourcePath = prev?.outerPath || renderedPath?.pathData || '';
+        if (!sourcePath) return prev;
+        const bounds = fixedLocalBounds ?? localBounds ?? baseBBox ?? prev?.bbox;
+        const clampedPoint = bounds
+          ? {
+              x: clamp(point.x, bounds.x, bounds.x + bounds.width),
+              y: clamp(point.y, bounds.y, bounds.y + bounds.height),
+            }
+          : point;
+        const updated = moveEditablePathPoint(sourcePath, pointId, clampedPoint);
+        const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
+        if (!nextBBox) return prev;
+        return createPathShapeOverride(updated.pathData, nextBBox, prev?.sourceType ?? 'custom_path');
+      });
+    },
+    [baseBBox, fixedLocalBounds, localBounds, renderedPath?.pathData]
+  );
 
   const handleResetShape = useCallback(() => {
-    if (!baseBBox) return;
-    setDraftShapeOverride(createIdentityShapeOverride(baseBBox));
-    setSelectedMeshPointIndex(null);
-  }, [baseBBox]);
+    if (!baseCharPath || !baseBBox) return;
+    setDraftShapeOverride(createPathShapeOverride(baseCharPath.pathData, baseBBox, 'font_glyph'));
+    setSelectedShapePointId(null);
+  }, [baseBBox, baseCharPath]);
 
   const handleSaveShape = useCallback(async () => {
     if (!editorCharId || !baseCharPath || !baseBBox || !draftShapeOverride) return;
-    const existingProject = projects.find((p) => p._id === projectId);
-    const projectName = existingProject?.name?.trim() || 'Untitled project';
-    const projectDescription = existingProject?.description;
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      notify({
+        variant: 'error',
+        title: 'Failed to persist shape',
+        description: 'You must be logged in.',
+      });
+      return;
+    }
 
-    const persistedShape = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
-    const oldWarped = warpPathDataWithOverride(baseCharPath.pathData, persistedShape);
-    const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox);
-    const nextWarped = warpPathDataWithOverride(baseCharPath.pathData, nextShape);
+    const persistedShape = normalizeShapeOverride(
+      getCharShapeOverride(editorCharId) ?? undefined,
+      baseBBox,
+      baseCharPath.pathData
+    );
+    const oldWarped = resolveShapePath(baseCharPath.pathData, persistedShape, baseBBox);
+    const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox, oldWarped.pathData);
+    const nextWarped = resolveShapePath(baseCharPath.pathData, nextShape, baseBBox);
     const oldBBox = oldWarped.bbox;
     const newBBox = nextWarped.bbox;
     const safeW = Math.max(1e-6, newBBox.width);
@@ -1307,6 +1381,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         ...led,
         u: (absX - newBBox.x) / safeW,
         v: (absY - newBBox.y) / safeH,
+        x: absX,
+        y: absY,
       };
     });
 
@@ -1315,11 +1391,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     setCharShapeOverride(editorCharId, nextShape);
     setIsDirty(true);
     setEditorMode('module');
-    setSelectedMeshPointIndex(null);
+    setSelectedShapePointId(null);
 
-    await saveCurrentProject(projectName, projectDescription);
-    const saveErr = useProjectsStore.getState().errorMessage;
-    if (saveErr) {
+    try {
+      await commitCharacterShapeOverride(accessToken, projectId, editorCharId, nextShape, remapped);
+    } catch (err) {
+      const saveErr =
+        typeof err === 'object' && err && 'message' in err && typeof (err as { message?: unknown }).message === 'string'
+          ? (err as { message: string }).message
+          : 'Failed to persist shape and modules';
       notify({
         variant: 'error',
         title: 'Failed to persist shape',
@@ -1327,6 +1407,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       });
       return;
     }
+
+    setIsDirty(false);
     notify({
       variant: 'success',
       title: 'Shape saved',
@@ -1341,8 +1423,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     getCharShapeOverride,
     notify,
     projectId,
-    projects,
-    saveCurrentProject,
     setCharManualLeds,
     setCharShapeOverride,
   ]);
@@ -1544,10 +1624,10 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
                       setIsDirty={setIsDirty}
-                      shapeOverride={editorMode === 'shape' ? draftShapeOverride : null}
-                      selectedMeshPointIndex={selectedMeshPointIndex}
-                      onSelectMeshPoint={setSelectedMeshPointIndex}
-                      onUpdateMeshPoint={handleUpdateMeshPoint}
+                      shapePoints={editorMode === 'shape' ? editableShapePoints : []}
+                      selectedShapePointId={selectedShapePointId}
+                      onSelectShapePoint={setSelectedShapePointId}
+                      onUpdateShapePoint={handleUpdateShapePoint}
                     />
                   </div>
                 ) : (
@@ -1903,24 +1983,35 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                   <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Shape Properties</div>
                   <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 text-sm space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-[var(--text-3)]">Mesh</span>
-                      <span className="text-[var(--text-1)]">{draftShapeOverride?.mesh.rows ?? 4} x {draftShapeOverride?.mesh.cols ?? 4}</span>
+                      <span className="text-[var(--text-3)]">Mode</span>
+                      <span className="text-[var(--text-1)]">Path anchors</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[var(--text-3)]">Nodes</span>
-                      <span className="text-[var(--text-1)]">{draftShapeOverride?.mesh.points.length ?? 0}</span>
+                      <span className="text-[var(--text-1)]">{editableShapePoints.length}</span>
                     </div>
-                    {selectedMeshPointIndex != null && draftShapeOverride?.mesh.points[selectedMeshPointIndex] && (
+                    {selectedShapePointId != null && editableShapePoints.find((p) => p.id === selectedShapePointId) && (
                       <div className="pt-2 border-t border-[var(--border-1)]">
                         <div className="text-[var(--text-3)] text-xs mb-1">Selected node</div>
-                        <div className="flex justify-between text-[var(--text-2)]">
-                          <span>X</span>
-                          <span>{draftShapeOverride.mesh.points[selectedMeshPointIndex].x.toFixed(1)}</span>
-                        </div>
-                        <div className="flex justify-between text-[var(--text-2)]">
-                          <span>Y</span>
-                          <span>{draftShapeOverride.mesh.points[selectedMeshPointIndex].y.toFixed(1)}</span>
-                        </div>
+                        {(() => {
+                          const selectedPoint = editableShapePoints.find((p) => p.id === selectedShapePointId)!;
+                          return (
+                            <>
+                              <div className="flex justify-between text-[var(--text-2)]">
+                                <span>Type</span>
+                                <span className="uppercase">{selectedPoint.kind}</span>
+                              </div>
+                              <div className="flex justify-between text-[var(--text-2)]">
+                                <span>X</span>
+                                <span>{selectedPoint.x.toFixed(1)}</span>
+                              </div>
+                              <div className="flex justify-between text-[var(--text-2)]">
+                                <span>Y</span>
+                                <span>{selectedPoint.y.toFixed(1)}</span>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

@@ -165,12 +165,56 @@ export class ProjectsController {
     @Param('characterId') characterId: string,
     @Body()
     body: {
-      version: number;
-      baseBBox: { x: number; y: number; width: number; height: number };
-      mesh: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
+      version?: number;
+      outerPath?: string;
+      holes?: string[];
+      units?: 'mm' | 'in';
+      bbox?: { x: number; y: number; width: number; height: number };
+      sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+      constraints?: { minStrokeWidthMm?: number; minChannelWidthMm?: number };
+      baseBBox?: { x: number; y: number; width: number; height: number };
+      mesh?: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
     },
   ) {
     return this.projectsService.putShapeOverride(req.user.userId, id, characterId, body);
+  }
+
+  @Post(':id/characters/:characterId/shape-commit')
+  async commitShape(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('characterId') characterId: string,
+    @Body()
+    body: {
+      shape: {
+        version?: number;
+        outerPath?: string;
+        holes?: string[];
+        units?: 'mm' | 'in';
+        bbox?: { x: number; y: number; width: number; height: number };
+        sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+        constraints?: { minStrokeWidthMm?: number; minChannelWidthMm?: number };
+        baseBBox?: { x: number; y: number; width: number; height: number };
+        mesh?: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
+      };
+      modules: Array<{
+        id: string;
+        u?: number;
+        v?: number;
+        x?: number;
+        y?: number;
+        rotation: number;
+        scale?: number;
+      }>;
+    },
+  ) {
+    return this.projectsService.commitShapeWithModules(
+      req.user.userId,
+      id,
+      characterId,
+      body.shape ?? {},
+      body.modules ?? [],
+    );
   }
 
   @Delete(':id/characters/:characterId/shape')
@@ -203,7 +247,17 @@ export class ProjectsController {
     @Param('id') id: string,
     @Param('characterId') characterId: string,
     @Body()
-    body: { modules: Array<{ id: string; u: number; v: number; rotation: number; scale?: number }> },
+    body: {
+      modules: Array<{
+        id: string;
+        u?: number;
+        v?: number;
+        x?: number;
+        y?: number;
+        rotation: number;
+        scale?: number;
+      }>;
+    },
   ) {
     return this.projectsService.replaceModules(req.user.userId, id, characterId, body.modules ?? []);
   }

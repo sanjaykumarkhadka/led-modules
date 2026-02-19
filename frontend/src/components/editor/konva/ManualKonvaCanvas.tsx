@@ -3,7 +3,7 @@ import { Circle, Group, Layer, Line, Path, Rect, Stage } from 'react-konva';
 import type Konva from 'konva';
 import type { ManualLED } from '../../../data/store';
 import { useTheme } from '../../ui/ThemeProvider';
-import type { CharacterShapeOverride } from '../../../core/math/shapeWarp';
+import type { EditablePathPoint } from '../../../core/math/pathEditor';
 import {
   BASE_LED_HEIGHT,
   BASE_LED_WIDTH,
@@ -52,10 +52,10 @@ export interface ManualKonvaCanvasProps {
   snapEnabled: boolean;
   gridSize: number;
   setIsDirty: (next: boolean) => void;
-  shapeOverride: CharacterShapeOverride | null;
-  selectedMeshPointIndex: number | null;
-  onSelectMeshPoint: (index: number | null) => void;
-  onUpdateMeshPoint: (index: number, point: { x: number; y: number }) => void;
+  shapePoints: EditablePathPoint[];
+  selectedShapePointId: string | null;
+  onSelectShapePoint: (id: string | null) => void;
+  onUpdateShapePoint: (id: string, point: { x: number; y: number }) => void;
 }
 
 function createLedId() {
@@ -86,10 +86,10 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   snapEnabled,
   gridSize,
   setIsDirty,
-  shapeOverride,
-  selectedMeshPointIndex,
-  onSelectMeshPoint,
-  onUpdateMeshPoint,
+  shapePoints,
+  selectedShapePointId,
+  onSelectShapePoint,
+  onUpdateShapePoint,
 }) => {
   const { theme } = useTheme();
   const telemetry = useInteractionTelemetry('manual-stage');
@@ -225,10 +225,14 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   const absoluteLeds = useMemo(() => {
     return draftLeds.map((led) => {
       const scaleValue = led.scale ?? 1;
+      const resolvedX =
+        led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
+      const resolvedY =
+        led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
       return {
         ...led,
-        x: localBounds.x + led.u * localBounds.width,
-        y: localBounds.y + led.v * localBounds.height,
+        x: resolvedX,
+        y: resolvedY,
         w: BASE_LED_WIDTH * scaleValue * charVisualScale,
         h: BASE_LED_HEIGHT * scaleValue * charVisualScale,
         scaleValue,
@@ -342,7 +346,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
 
           if (editorMode === 'shape') {
             if (evt.target === evt.target.getStage()) {
-              onSelectMeshPoint(null);
+              onSelectShapePoint(null);
             }
             return;
           }
@@ -350,7 +354,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           if (tool === 'add') {
             const snapped = snapPoint(world);
             const { u, v } = toManual(snapped);
-            const newLed: ManualLED = { id: createLedId(), u, v, rotation: 0 };
+            const newLed: ManualLED = { id: createLedId(), u, v, x: snapped.x, y: snapped.y, rotation: 0 };
             setDraftLeds((prev) => [...prev, newLed]);
             setSelectedLedIds(new Set([newLed.id]));
             setIsDirty(true);
@@ -426,10 +430,14 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                 if (!start) return led;
                 const nextU = start.u + du;
                 const nextV = start.v + dv;
+                const nextX = localBounds.x + nextU * localBounds.width;
+                const nextY = localBounds.y + nextV * localBounds.height;
                 return {
                   ...led,
                   u: nextU,
                   v: nextV,
+                  x: nextX,
+                  y: nextY,
                 };
               })
             );
@@ -518,7 +526,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                 const uv = toManual({ x: nextX, y: nextY });
                 let rotation = startRot + delta;
                 rotation = ((rotation % 360) + 360) % 360;
-                return { ...it, u: uv.u, v: uv.v, rotation };
+                return { ...it, u: uv.u, v: uv.v, x: nextX, y: nextY, rotation };
               })
             );
             setIsDirty(true);
@@ -787,60 +795,56 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             />
           )}
 
-          {shapeOverride && (
+          {shapePoints.length > 0 && (
             <Group x={-pathOffset.x} y={-pathOffset.y}>
-              {Array.from({ length: shapeOverride.mesh.rows }).map((_, r) =>
-                Array.from({ length: shapeOverride.mesh.cols - 1 }).map((__, c) => {
-                  const p1 = shapeOverride.mesh.points[r * shapeOverride.mesh.cols + c];
-                  const p2 = shapeOverride.mesh.points[r * shapeOverride.mesh.cols + c + 1];
-                  return (
-                    <Line
-                      key={`mesh-h-${r}-${c}`}
-                      points={[p1.x, p1.y, p2.x, p2.y]}
-                      stroke={isDark ? 'rgba(59,130,246,0.55)' : 'rgba(37,99,235,0.5)'}
-                      strokeWidth={0.8}
-                      dash={[2, 2]}
-                      listening={false}
-                    />
-                  );
-                })
-              )}
-              {Array.from({ length: shapeOverride.mesh.cols }).map((_, c) =>
-                Array.from({ length: shapeOverride.mesh.rows - 1 }).map((__, r) => {
-                  const p1 = shapeOverride.mesh.points[r * shapeOverride.mesh.cols + c];
-                  const p2 = shapeOverride.mesh.points[(r + 1) * shapeOverride.mesh.cols + c];
-                  return (
-                    <Line
-                      key={`mesh-v-${r}-${c}`}
-                      points={[p1.x, p1.y, p2.x, p2.y]}
-                      stroke={isDark ? 'rgba(59,130,246,0.55)' : 'rgba(37,99,235,0.5)'}
-                      strokeWidth={0.8}
-                      dash={[2, 2]}
-                      listening={false}
-                    />
-                  );
-                })
-              )}
-              {shapeOverride.mesh.points.map((p, i) => {
-                const selected = selectedMeshPointIndex === i;
+              {shapePoints.map((point) => {
+                const selected = selectedShapePointId === point.id;
+                const radius =
+                  point.kind === 'anchor'
+                    ? selected
+                      ? 2.5
+                      : 2.1
+                    : selected
+                      ? 2.2
+                      : 1.8;
+                const fill =
+                  point.kind === 'anchor'
+                    ? selected
+                      ? '#2563eb'
+                      : '#f8fafc'
+                    : selected
+                      ? '#38bdf8'
+                      : isDark
+                        ? '#94a3b8'
+                        : '#64748b';
+                const stroke =
+                  point.kind === 'anchor'
+                    ? selected
+                      ? '#f8fafc'
+                      : '#2563eb'
+                    : selected
+                      ? '#f8fafc'
+                      : isDark
+                        ? '#38bdf8'
+                        : '#0ea5e9';
                 return (
                   <Circle
-                    key={`mesh-p-${i}`}
-                    x={p.x}
-                    y={p.y}
-                    radius={selected ? 2.4 : 2}
-                    fill={selected ? '#2563eb' : '#f8fafc'}
-                    stroke={selected ? '#f8fafc' : '#2563eb'}
+                    key={point.id}
+                    x={point.x}
+                    y={point.y}
+                    radius={radius}
+                    fill={fill}
+                    stroke={stroke}
                     strokeWidth={selected ? 1.1 : 0.9}
                     draggable={editorMode === 'shape'}
                     onMouseDown={() => {
                       if (editorMode !== 'shape') return;
-                      onSelectMeshPoint(i);
+                      onSelectShapePoint(point.id);
                     }}
                     onDragMove={(evt) => {
                       if (editorMode !== 'shape') return;
                       const pos = evt.target.position();
-                      onUpdateMeshPoint(i, { x: pos.x, y: pos.y });
+                      onUpdateShapePoint(point.id, { x: pos.x, y: pos.y });
                     }}
                   />
                 );

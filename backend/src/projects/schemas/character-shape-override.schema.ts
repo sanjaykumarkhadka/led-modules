@@ -34,6 +34,14 @@ class ShapeMesh {
   points: ShapePoint[];
 }
 
+class ShapeConstraint {
+  @Prop({ type: Number })
+  minStrokeWidthMm?: number;
+
+  @Prop({ type: Number })
+  minChannelWidthMm?: number;
+}
+
 @Schema({ timestamps: true, collection: 'character_shape_overrides' })
 export class CharacterShapeOverride extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Project', required: true, index: true })
@@ -42,14 +50,34 @@ export class CharacterShapeOverride extends Document {
   @Prop({ type: String, ref: 'ProjectCharacter', required: true, unique: true })
   characterId: string;
 
-  @Prop({ type: Number, required: true, default: 1 })
+  @Prop({ type: Number, required: true, default: 2 })
   version: number;
 
-  @Prop({ type: BaseBBox, required: true })
-  baseBBox: BaseBBox;
+  // v2 canonical path-native geometry
+  @Prop({ type: String })
+  outerPath?: string;
 
-  @Prop({ type: ShapeMesh, required: true })
-  mesh: ShapeMesh;
+  @Prop({ type: [String], default: [] })
+  holes?: string[];
+
+  @Prop({ type: String, enum: ['mm', 'in'], default: 'mm' })
+  units?: 'mm' | 'in';
+
+  @Prop({ type: BaseBBox })
+  bbox?: BaseBBox;
+
+  @Prop({ type: String, enum: ['font_glyph', 'svg_import', 'custom_path'], default: 'font_glyph' })
+  sourceType?: 'font_glyph' | 'svg_import' | 'custom_path';
+
+  @Prop({ type: ShapeConstraint })
+  constraints?: ShapeConstraint;
+
+  // Legacy mesh fields kept for compatibility reads.
+  @Prop({ type: BaseBBox })
+  baseBBox?: BaseBBox;
+
+  @Prop({ type: ShapeMesh })
+  mesh?: ShapeMesh;
 }
 
 export const CharacterShapeOverrideSchema = SchemaFactory.createForClass(CharacterShapeOverride);
