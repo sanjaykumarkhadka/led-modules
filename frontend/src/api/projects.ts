@@ -5,6 +5,7 @@ export interface Project {
   ownerId: string;
   name: string;
   description?: string;
+  isFavorite?: boolean;
   data: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -13,6 +14,7 @@ export interface Project {
 export interface ProjectPayload {
   name: string;
   description?: string;
+  isFavorite?: boolean;
   data: Record<string, unknown>;
 }
 
@@ -67,4 +69,3 @@ export async function deleteProject(
     accessToken,
   });
 }
-

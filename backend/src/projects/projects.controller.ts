@@ -16,6 +16,7 @@ interface ProjectDto {
   name: string;
   description?: string;
   data: Record<string, unknown>;
+  isFavorite?: boolean;
 }
 
 @Controller('projects')

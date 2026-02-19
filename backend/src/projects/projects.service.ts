@@ -7,6 +7,7 @@ interface UpsertProjectPayload {
   name: string;
   description?: string;
   data: Record<string, unknown>;
+  isFavorite?: boolean;
 }
 
 @Injectable()
@@ -71,4 +72,3 @@ export class ProjectsService {
     }
   }
 }
-

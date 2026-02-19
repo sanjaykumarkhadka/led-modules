@@ -39,6 +39,7 @@ interface ProjectsState {
   saveCurrentProject: (name: string, description?: string) => Promise<void>;
   renameProjectById: (id: string, name: string) => Promise<void>;
   deleteProjectById: (id: string) => Promise<void>;
+  toggleFavoriteById: (id: string, isFavorite: boolean) => Promise<void>;
 }
 
 function toErrorMessage(err: unknown, fallback: string) {
@@ -297,6 +298,35 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
       set({
         loading: false,
         errorMessage: toErrorMessage(err, 'Failed to rename project'),
+      });
+    }
+  },
+
+  async toggleFavoriteById(id: string, isFavorite: boolean) {
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      set({ errorMessage: 'You must be logged in to update projects.' });
+      return;
+    }
+    set({ loading: true, errorMessage: null });
+    try {
+      const existing = get().projects.find((p) => p._id === id);
+      const project = existing ?? (await getProject(accessToken, id));
+      await updateProject(accessToken, id, {
+        name: project.name,
+        description: project.description,
+        isFavorite,
+        data: project.data ?? {},
+      });
+      const projects = await listProjects(accessToken);
+      set({
+        projects,
+        loading: false,
+      });
+    } catch (err: unknown) {
+      set({
+        loading: false,
+        errorMessage: toErrorMessage(err, 'Failed to update favorite'),
       });
     }
   },

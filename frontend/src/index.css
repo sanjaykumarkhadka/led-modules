@@ -120,6 +120,11 @@ body {
   overflow-x: hidden;
 }
 
+body.route-projects-dark {
+  background-color: #09090b !important;
+  background-image: none !important;
+}
+
 #root {
   background: transparent;
   min-height: 100%;

@@ -12,10 +12,12 @@ export class Project extends Document {
   @Prop()
   description?: string;
 
+  @Prop({ type: Boolean, default: false })
+  isFavorite: boolean;
+
   // Serialized LED design data; keep flexible for now
   @Prop({ type: Object, required: true })
   data: Record<string, unknown>;
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);
-
