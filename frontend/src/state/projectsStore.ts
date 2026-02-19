@@ -1,31 +1,26 @@
 import { create } from 'zustand';
 import type { Project } from '../api/projects';
-import {
-  listProjects,
-  createProject,
-  updateProject,
-  getProject,
-} from '../api/projects';
+import { createProject, deleteProject, getProject, listProjects, updateProject } from '../api/projects';
 import { useAuthStore } from './authStore';
 import { useProjectStore } from '../data/store';
-
-export interface DesignData {
-  blocks: ReturnType<typeof useProjectStore.getState>['blocks'];
-  charactersByBlock?: ReturnType<typeof useProjectStore.getState>['charactersByBlock'];
-  depthInches: number;
-  selectedModuleId: string;
-  showDimensions: boolean;
-  dimensionUnit: 'mm' | 'in';
-  manualLedOverrides: ReturnType<typeof useProjectStore.getState>['manualLedOverrides'];
-  ledCountOverrides: ReturnType<typeof useProjectStore.getState>['ledCountOverrides'];
-  ledColumnOverrides: ReturnType<typeof useProjectStore.getState>['ledColumnOverrides'];
-  ledOrientationOverrides: ReturnType<
-    typeof useProjectStore.getState
-  >['ledOrientationOverrides'];
-  placementModeOverrides: ReturnType<
-    typeof useProjectStore.getState
-  >['placementModeOverrides'];
-}
+import { getProjectDesignSettings, patchProjectDesignSettings } from '../api/projectDesign';
+import { deleteProjectBlock, listProjectBlocks, upsertProjectBlock } from '../api/projectBlocks';
+import {
+  deleteProjectCharacter,
+  listProjectCharacters,
+  upsertProjectCharacter,
+} from '../api/projectCharacters';
+import {
+  deleteCharacterShapeOverride,
+  listProjectShapeOverrides,
+  putCharacterShapeOverride,
+} from '../api/projectShapes';
+import { listProjectModules, replaceCharacterModules } from '../api/projectModules';
+import {
+  deleteCharacterOverride,
+  listProjectCharacterOverrides,
+  patchCharacterOverride,
+} from '../api/projectOverrides';
 
 interface ProjectsState {
   projects: Project[];
@@ -50,89 +45,227 @@ function toErrorMessage(err: unknown, fallback: string) {
   return fallback;
 }
 
-function createLegacyCharId(blockId: string, index: number) {
-  return `${blockId}-${index}`;
-}
+async function hydrateProjectGraph(accessToken: string, projectId: string) {
+  const [meta, design, blocks, characters, shapes, modules, overrides] = await Promise.all([
+    getProject(accessToken, projectId),
+    getProjectDesignSettings(accessToken, projectId),
+    listProjectBlocks(accessToken, projectId),
+    listProjectCharacters(accessToken, projectId),
+    listProjectShapeOverrides(accessToken, projectId),
+    listProjectModules(accessToken, projectId),
+    listProjectCharacterOverrides(accessToken, projectId),
+  ]);
 
-function remapLegacyOverrides<T>(
-  source: Record<string, T> | undefined,
-  idMap: Record<string, string>
-): Record<string, T> {
-  if (!source) return {};
-  const next: Record<string, T> = {};
-  Object.entries(source).forEach(([key, value]) => {
-    const remapped = idMap[key] ?? key;
-    next[remapped] = value;
-  });
-  return next;
-}
+  const blocksState = blocks
+    .sort((a, b) => a.order - b.order)
+    .map((b) => ({
+      id: b.id,
+      text: b.text,
+      x: b.x,
+      y: b.y,
+      fontSize: b.fontSize,
+      language: b.language,
+    }));
 
-function migrateCharactersFromBlocks(design: DesignData) {
   const charactersByBlock: ReturnType<typeof useProjectStore.getState>['charactersByBlock'] = {};
-  const idMap: Record<string, string> = {};
-
-  design.blocks.forEach((block) => {
-    const glyphs = Array.from(block.text || '');
-    const spacing = Math.max(1, block.fontSize * 0.76);
-    charactersByBlock[block.id] = glyphs.map((glyph, index) => {
-      const newId = `${block.id}-char-${index}-${Math.random().toString(36).slice(2, 8)}`;
-      idMap[createLegacyCharId(block.id, index)] = newId;
-      return {
-        id: newId,
-        glyph,
-        x: block.x + index * spacing,
-        baselineY: block.y,
-        fontSize: block.fontSize,
-        language: block.language,
-        order: index,
-      };
+  for (const ch of characters.sort((a, b) => a.order - b.order)) {
+    const list = charactersByBlock[ch.blockId] ?? [];
+    list.push({
+      id: ch.id,
+      glyph: ch.glyph,
+      x: ch.x,
+      baselineY: ch.baselineY,
+      fontSize: ch.fontSize,
+      language: ch.language,
+      order: ch.order,
     });
-  });
+    charactersByBlock[ch.blockId] = list;
+  }
 
-  return { charactersByBlock, idMap };
+  const manualLedOverrides: Record<string, ReturnType<typeof useProjectStore.getState>['getCharManualLeds'] extends (id: string) => infer T ? T : never> = {};
+  for (const m of modules) {
+    const list = manualLedOverrides[m.characterId] ?? [];
+    list.push({
+      id: m.id,
+      u: m.u,
+      v: m.v,
+      rotation: m.rotation,
+      ...(m.scale != null ? { scale: m.scale } : {}),
+    });
+    manualLedOverrides[m.characterId] = list;
+  }
+
+  const charShapeOverrides: Record<string, ReturnType<typeof useProjectStore.getState>['getCharShapeOverride'] extends (id: string) => infer T ? NonNullable<T> : never> = {};
+  for (const s of shapes) {
+    charShapeOverrides[s.characterId] = {
+      version: 1,
+      baseBBox: s.baseBBox,
+      mesh: s.mesh,
+    };
+  }
+
+  const ledCountOverrides: Record<string, number> = {};
+  const ledColumnOverrides: Record<string, number> = {};
+  const ledOrientationOverrides: Record<string, 'horizontal' | 'vertical' | 'auto'> = {};
+  const placementModeOverrides: Record<string, 'manual' | 'auto'> = {};
+  for (const ov of overrides) {
+    if (ov.ledCount != null) ledCountOverrides[ov.characterId] = ov.ledCount;
+    if (ov.ledColumns != null) ledColumnOverrides[ov.characterId] = ov.ledColumns;
+    if (ov.ledOrientation != null) ledOrientationOverrides[ov.characterId] = ov.ledOrientation;
+    if (ov.placementMode != null) placementModeOverrides[ov.characterId] = ov.placementMode;
+  }
+
+  const fallbackBlock = {
+    id: '1',
+    text: '',
+    x: 50,
+    y: 200,
+    fontSize: 150,
+    language: 'en',
+  };
+  const nextBlocks = blocksState.length > 0 ? blocksState : [fallbackBlock];
+  const nextCharsByBlock =
+    Object.keys(charactersByBlock).length > 0
+      ? charactersByBlock
+      : { [nextBlocks[0].id]: [] };
+
+  useProjectStore.setState((state) => ({
+    blocks: nextBlocks,
+    selectedBlockId: nextBlocks[0]?.id ?? null,
+    charactersByBlock: nextCharsByBlock,
+    selectedCharId: null,
+    depthInches: design?.depthInches ?? state.depthInches,
+    selectedModuleId: design?.selectedModuleId ?? state.selectedModuleId,
+    showDimensions: design?.showDimensions ?? state.showDimensions,
+    dimensionUnit: design?.dimensionUnit ?? state.dimensionUnit,
+    defaultLedCount: design?.defaultLedCount ?? state.defaultLedCount,
+    defaultLedColumns: design?.defaultLedColumns ?? state.defaultLedColumns,
+    defaultLedOrientation: design?.defaultLedOrientation ?? state.defaultLedOrientation,
+    manualLedOverrides,
+    charShapeOverrides,
+    ledCountOverrides,
+    ledColumnOverrides,
+    ledOrientationOverrides,
+    placementModeOverrides,
+  }));
+
+  return meta;
 }
 
-function serializeDesign(): DesignData {
+async function syncNormalizedGraph(accessToken: string, projectId: string) {
   const state = useProjectStore.getState();
-  return {
-    blocks: state.blocks,
-    charactersByBlock: state.charactersByBlock,
+  await patchProjectDesignSettings(accessToken, projectId, {
     depthInches: state.depthInches,
     selectedModuleId: state.selectedModuleId,
     showDimensions: state.showDimensions,
     dimensionUnit: state.dimensionUnit,
-    manualLedOverrides: state.manualLedOverrides,
-    ledCountOverrides: state.ledCountOverrides,
-    ledColumnOverrides: state.ledColumnOverrides,
-    ledOrientationOverrides: state.ledOrientationOverrides,
-    placementModeOverrides: state.placementModeOverrides,
-  };
-}
+    defaultLedCount: state.defaultLedCount,
+    defaultLedColumns: state.defaultLedColumns,
+    defaultLedOrientation: state.defaultLedOrientation,
+  });
 
-function applyDesign(design: DesignData) {
-  let charactersByBlock =
-    design.charactersByBlock as ReturnType<typeof useProjectStore.getState>['charactersByBlock'] | undefined;
-  let idMap: Record<string, string> = {};
+  const existingBlocks = await listProjectBlocks(accessToken, projectId);
+  const nextBlocks = state.blocks.map((b, i) => ({
+    id: b.id,
+    text: b.text,
+    x: b.x,
+    y: b.y,
+    fontSize: b.fontSize,
+    language: b.language,
+    order: i,
+  }));
+  await Promise.all(
+    nextBlocks.map((b) =>
+      upsertProjectBlock(accessToken, projectId, b.id, {
+        text: b.text,
+        x: b.x,
+        y: b.y,
+        fontSize: b.fontSize,
+        language: b.language,
+        order: b.order,
+      })
+    )
+  );
+  const nextBlockIds = new Set(nextBlocks.map((b) => b.id));
+  await Promise.all(
+    existingBlocks.filter((b) => !nextBlockIds.has(b.id)).map((b) => deleteProjectBlock(accessToken, projectId, b.id))
+  );
 
-  if (!charactersByBlock || Object.keys(charactersByBlock).length === 0) {
-    const migrated = migrateCharactersFromBlocks(design);
-    charactersByBlock = migrated.charactersByBlock;
-    idMap = migrated.idMap;
+  const existingCharacters = await listProjectCharacters(accessToken, projectId);
+  const nextCharacters = Object.entries(state.charactersByBlock).flatMap(([blockId, chars]) =>
+    [...chars]
+      .sort((a, b) => a.order - b.order)
+      .map((ch, i) => ({
+        id: ch.id,
+        blockId,
+        glyph: ch.glyph,
+        x: ch.x,
+        baselineY: ch.baselineY,
+        fontSize: ch.fontSize,
+        language: ch.language,
+        order: i,
+      }))
+  );
+
+  await Promise.all(
+    nextCharacters.map((ch) =>
+      upsertProjectCharacter(accessToken, projectId, ch.id, {
+        blockId: ch.blockId,
+        glyph: ch.glyph,
+        x: ch.x,
+        baselineY: ch.baselineY,
+        fontSize: ch.fontSize,
+        language: ch.language,
+        order: ch.order,
+      })
+    )
+  );
+
+  const nextCharIds = new Set(nextCharacters.map((c) => c.id));
+  await Promise.all(
+    existingCharacters
+      .filter((c) => !nextCharIds.has(c.id))
+      .map((c) => deleteProjectCharacter(accessToken, projectId, c.id))
+  );
+
+  for (const charId of nextCharIds) {
+    const modules = state.manualLedOverrides[charId] ?? [];
+    await replaceCharacterModules(accessToken, projectId, charId, modules);
   }
 
-  useProjectStore.setState({
-    blocks: design.blocks,
-    charactersByBlock,
-    depthInches: design.depthInches,
-    selectedModuleId: design.selectedModuleId,
-    showDimensions: design.showDimensions,
-    dimensionUnit: design.dimensionUnit,
-    manualLedOverrides: remapLegacyOverrides(design.manualLedOverrides, idMap),
-    ledCountOverrides: remapLegacyOverrides(design.ledCountOverrides, idMap),
-    ledColumnOverrides: remapLegacyOverrides(design.ledColumnOverrides, idMap),
-    ledOrientationOverrides: remapLegacyOverrides(design.ledOrientationOverrides, idMap),
-    placementModeOverrides: remapLegacyOverrides(design.placementModeOverrides, idMap),
-  });
+  const existingShapes = await listProjectShapeOverrides(accessToken, projectId);
+  const nextShapeIds = new Set(Object.keys(state.charShapeOverrides ?? {}));
+  await Promise.all(
+    Object.entries(state.charShapeOverrides ?? {}).map(([charId, shape]) =>
+      putCharacterShapeOverride(accessToken, projectId, charId, shape)
+    )
+  );
+  await Promise.all(
+    existingShapes
+      .filter((s) => !nextShapeIds.has(s.characterId))
+      .map((s) => deleteCharacterShapeOverride(accessToken, projectId, s.characterId))
+  );
+
+  const overrideCharIds = new Set<string>([
+    ...Object.keys(state.ledCountOverrides ?? {}),
+    ...Object.keys(state.ledColumnOverrides ?? {}),
+    ...Object.keys(state.ledOrientationOverrides ?? {}),
+    ...Object.keys(state.placementModeOverrides ?? {}),
+  ]);
+  for (const charId of overrideCharIds) {
+    await patchCharacterOverride(accessToken, projectId, charId, {
+      ledCount: state.ledCountOverrides?.[charId],
+      ledColumns: state.ledColumnOverrides?.[charId],
+      ledOrientation: state.ledOrientationOverrides?.[charId],
+      placementMode: state.placementModeOverrides?.[charId],
+    });
+  }
+  const existingOverrides = await listProjectCharacterOverrides(accessToken, projectId);
+  await Promise.all(
+    existingOverrides
+      .filter((ov) => !overrideCharIds.has(ov.characterId))
+      .map((ov) => deleteCharacterOverride(accessToken, projectId, ov.characterId))
+  );
 }
 
 export const useProjectsStore = create<ProjectsState>((set, get) => ({
@@ -167,19 +300,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const data = serializeDesign();
-      const payload = {
-        name,
-        description,
-        data: data as unknown as Record<string, unknown>,
-      };
-      await createProject(accessToken, payload);
+      await createProject(accessToken, { name, description });
       const projects = await listProjects(accessToken);
-      set({
-        projects,
-        loading: false,
-        currentProjectId: null,
-      });
+      set({ projects, loading: false, currentProjectId: null });
     } catch (err: unknown) {
       set({
         loading: false,
@@ -196,9 +319,7 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const project = await getProject(accessToken, id);
-      const design = project.data as unknown as DesignData;
-      applyDesign(design);
+      const project = await hydrateProjectGraph(accessToken, id);
       const existingProjects = get().projects;
       const withoutCurrent = existingProjects.filter((p) => p._id !== project._id);
       set({
@@ -222,19 +343,14 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const data = serializeDesign();
-      const payload = {
-        name,
-        description,
-        data: data as unknown as Record<string, unknown>,
-      };
       const currentId = get().currentProjectId;
       let project: Project;
       if (currentId) {
-        project = await updateProject(accessToken, currentId, payload);
+        project = await updateProject(accessToken, currentId, { name, description });
       } else {
-        project = await createProject(accessToken, payload);
+        project = await createProject(accessToken, { name, description });
       }
+      await syncNormalizedGraph(accessToken, project._id);
       const existingProjects = get().projects;
       const withoutCurrent = existingProjects.filter((p) => p._id !== project._id);
       set({
@@ -258,7 +374,6 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const { deleteProject } = await import('../api/projects');
       await deleteProject(accessToken, id);
       const projects = await listProjects(accessToken);
       set({
@@ -282,18 +397,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const existing = get().projects.find((p) => p._id === id);
-      const project = existing ?? (await getProject(accessToken, id));
-      await updateProject(accessToken, id, {
-        name,
-        description: project.description,
-        data: project.data ?? {},
-      });
+      await updateProject(accessToken, id, { name });
       const projects = await listProjects(accessToken);
-      set({
-        projects,
-        loading: false,
-      });
+      set({ projects, loading: false });
     } catch (err: unknown) {
       set({
         loading: false,
@@ -310,19 +416,9 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
     }
     set({ loading: true, errorMessage: null });
     try {
-      const existing = get().projects.find((p) => p._id === id);
-      const project = existing ?? (await getProject(accessToken, id));
-      await updateProject(accessToken, id, {
-        name: project.name,
-        description: project.description,
-        isFavorite,
-        data: project.data ?? {},
-      });
+      await updateProject(accessToken, id, { isFavorite });
       const projects = await listProjects(accessToken);
-      set({
-        projects,
-        loading: false,
-      });
+      set({ projects, loading: false });
     } catch (err: unknown) {
       set({
         loading: false,

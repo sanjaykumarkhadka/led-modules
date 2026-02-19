@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Project } from '../api/projects';
 import { useProjectsStore } from '../state/projectsStore';
@@ -320,10 +320,22 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
   const [newDescription, setNewDescription] = useState('');
   const [editName, setEditName] = useState('');
   const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
+  const lastErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!errorMessage) return;
+    if (errorMessage === lastErrorRef.current) return;
+    lastErrorRef.current = errorMessage;
+    notify({
+      variant: 'error',
+      title: 'Projects error',
+      description: errorMessage,
+    });
+  }, [errorMessage, notify]);
 
   const filteredProjects = useMemo(
     () =>
@@ -417,8 +429,6 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
           </button>
         </div>
       </div>
-
-      {errorMessage ? <p className="text-sm text-rose-400">{errorMessage}</p> : null}
 
       {!loading && filteredProjects.length === 0 ? (
         <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/50">

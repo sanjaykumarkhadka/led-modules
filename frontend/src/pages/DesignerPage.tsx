@@ -5,23 +5,16 @@ import { useProjectsStore } from '../state/projectsStore';
 import { MODULE_CATALOG } from '../data/catalog/modules';
 import { Button } from '../components/ui/Button';
 import { CanvasStage } from '../components/canvas/CanvasStage';
-import { InlineError } from '../components/ui/InlineError';
 import { Select } from '../components/ui/Select';
 import { Input } from '../components/ui/Input';
 import { FieldRow } from '../components/ui/FieldRow';
 import { ToolRailButton } from '../components/ui/ToolRailButton';
 import { useToast } from '../components/ui/ToastProvider';
 
-const MIN_DESIGN_FONT_SIZE = 8;
-const MAX_DESIGN_FONT_SIZE = 96;
 const SYNC_INTERVAL_MS = 3000;
+const CHARACTER_OPTIONS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 type SyncState = 'synced' | 'pending' | 'syncing' | 'error';
-
-function clampFontSize(value: number) {
-  if (!Number.isFinite(value)) return 24;
-  return Math.min(MAX_DESIGN_FONT_SIZE, Math.max(MIN_DESIGN_FONT_SIZE, Math.round(value)));
-}
 
 function pruneOverrideKeys(removedCharIds: Set<string>) {
   if (removedCharIds.size === 0) return;
@@ -33,6 +26,7 @@ function pruneOverrideKeys(removedCharIds: Set<string>) {
 
     return {
       manualLedOverrides: prune(state.manualLedOverrides ?? {}),
+      charShapeOverrides: prune(state.charShapeOverrides ?? {}),
       ledCountOverrides: prune(state.ledCountOverrides ?? {}),
       ledColumnOverrides: prune(state.ledColumnOverrides ?? {}),
       ledOrientationOverrides: prune(state.ledOrientationOverrides ?? {}),
@@ -49,7 +43,7 @@ export function DesignerPage() {
 
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
-  const [newCharacter, setNewCharacter] = useState('');
+  const [newCharacter, setNewCharacter] = useState('A');
   const [depthInput, setDepthInput] = useState('5');
   const [syncState, setSyncState] = useState<SyncState>('synced');
 
@@ -57,6 +51,7 @@ export function DesignerPage() {
   const dirtyRef = useRef(false);
   const openedProjectIdRef = useRef<string | null>(null);
   const lastAutosaveErrorRef = useRef<string | null>(null);
+  const lastProjectsErrorRef = useRef<string | null>(null);
 
   const { projects, openProject, saveCurrentProject, errorMessage: projectsError } = useProjectsStore();
 
@@ -74,7 +69,6 @@ export function DesignerPage() {
     setModule,
     addCharacter,
     removeCharacter,
-    updateCharacter,
   } = useProjectStore();
 
   const activeBlock = blocks[0];
@@ -189,6 +183,17 @@ export function DesignerPage() {
     };
   }, [flushSync]);
 
+  useEffect(() => {
+    if (!projectsError) return;
+    if (projectsError === lastProjectsErrorRef.current) return;
+    lastProjectsErrorRef.current = projectsError;
+    notify({
+      variant: 'error',
+      title: 'Project error',
+      description: projectsError,
+    });
+  }, [notify, projectsError]);
+
   const applyDepthFromInput = useCallback(
     (value: string) => {
       const parsed = Number.parseFloat(value);
@@ -215,10 +220,10 @@ export function DesignerPage() {
 
   const handleAddCharacter = useCallback(() => {
     if (!activeBlock) return;
-    const glyph = Array.from(newCharacter.trim())[0];
+    const glyph = Array.from(newCharacter.trim().toUpperCase())[0];
     if (!glyph) return;
     const createdId = addCharacter(activeBlock.id, glyph);
-    setNewCharacter('');
+    setNewCharacter(glyph);
     if (createdId) {
       selectChar(createdId);
       markDirty();
@@ -245,20 +250,25 @@ export function DesignerPage() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3">
-      <header className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)]">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#09090b] p-3 text-zinc-100 [--surface-panel:#111111] [--surface-elevated:#171717] [--surface-subtle:#0f0f10] [--surface-strong:#222225] [--text-1:#f4f4f5] [--text-2:#d4d4d8] [--text-3:#a1a1aa] [--text-4:#71717a] [--border-1:#27272a] [--border-2:#3f3f46] [--stage-bg:#0b0b0c] [--stage-grid-line:rgba(161,161,170,0.2)]">
+      <header className="rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90">
         <div className="flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" onClick={() => navigate('/')}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => navigate('/')}
+              className="border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
+            >
               ⌂
             </Button>
-            <span className="text-3xl font-semibold">Channel Letter</span>
+            <span className="text-3xl font-semibold text-zinc-100">Channel Letter</span>
           </div>
           <div
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               syncState === 'error'
-                ? 'border-[var(--danger-500)] text-[var(--danger-500)]'
-                : 'border-[var(--border-2)] text-[var(--text-3)]'
+                ? 'border-rose-500 text-rose-400'
+                : 'border-zinc-700 text-zinc-400'
             }`}
           >
             {syncLabel}
@@ -266,25 +276,23 @@ export function DesignerPage() {
         </div>
       </header>
 
-      {projectsError && <InlineError message={projectsError} />}
-
       <main className="grid h-full min-h-0 flex-1 grid-cols-[76px_minmax(0,1fr)_510px] gap-3 overflow-hidden">
-        <aside className="h-full min-h-0 rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-2">
+        <aside className="h-full min-h-0 rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90 p-2">
           <div className="flex flex-col items-center gap-2">
             <ToolRailButton srLabel="Zoom In" icon={<span aria-hidden className="text-lg">⊕</span>} />
             <ToolRailButton srLabel="Zoom Out" icon={<span aria-hidden className="text-lg">⊖</span>} />
           </div>
         </aside>
 
-        <section className="h-full min-h-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-subtle)]">
+        <section className="h-full min-h-0 overflow-hidden rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-950/80">
           <div className="h-full min-h-0">
             <CanvasStage onCharacterMutate={markDirty} />
           </div>
         </section>
 
-        <aside className="h-full min-h-0 space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
-          <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-elevated)] p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)]">
+        <aside className="h-full min-h-0 space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90 p-4">
+          <div className="space-y-2 rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-950/60 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
               Characters
             </div>
             <div className="flex flex-wrap gap-2">
@@ -295,8 +303,8 @@ export function DesignerPage() {
                     key={char.id}
                     className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 ${
                       selected
-                        ? 'border-[var(--accent-400)] bg-[var(--accent-soft)] text-[var(--accent-600)]'
-                        : 'border-[var(--border-2)] bg-[var(--surface-subtle)] text-[var(--text-2)]'
+                        ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+                        : 'border-zinc-700 bg-zinc-900 text-zinc-300'
                     }`}
                   >
                     <button type="button" onClick={() => selectChar(char.id)} className="text-sm">
@@ -309,6 +317,7 @@ export function DesignerPage() {
                         title="Open manual editor"
                         onClick={() => navigate(`/projects/${projectId}/manual/${char.id}`)}
                         className="text-xs hover:text-[var(--text-1)]"
+                        
                       >
                         ✎
                       </button>
@@ -327,27 +336,24 @@ export function DesignerPage() {
               })}
             </div>
             <div className="flex items-center gap-2">
-              <Input
-                type="text"
+              <Select
                 value={newCharacter}
-                maxLength={2}
-                placeholder="Add char"
                 onChange={(e) => setNewCharacter(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddCharacter();
-                  }
-                }}
                 className="h-9 bg-[var(--surface-subtle)]"
-              />
-              <Button size="sm" variant="outline" onClick={handleAddCharacter}>
+              >
+                {CHARACTER_OPTIONS.map((char) => (
+                  <option key={char} value={char}>
+                    {char}
+                  </option>
+                ))}
+              </Select>
+              <Button size="sm" variant="outline" onClick={handleAddCharacter} className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800">
                 Add
               </Button>
             </div>
           </div>
 
-          <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--surface-panel)] p-1">
+          <div className="space-y-2 rounded-[var(--radius-md)] bg-zinc-900/60 p-1">
             <FieldRow
               label="Selected Character"
               control={
@@ -363,7 +369,7 @@ export function DesignerPage() {
               control={
                 <Button
                   variant="outline"
-                  className="h-11 w-full justify-center"
+                  className="h-11 w-full justify-center border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                   disabled={!selectedCharId || !projectId || projectId === 'new'}
                   onClick={() => {
                     if (!selectedCharId || !projectId || projectId === 'new') return;
@@ -373,10 +379,6 @@ export function DesignerPage() {
                   Open Manual Editor
                 </Button>
               }
-            />
-            <FieldRow
-              label="Your Text"
-              control={<Input value={characters.map((char) => char.glyph).join('')} readOnly className="h-11 bg-[var(--surface-strong)]" />}
             />
             <FieldRow
               label="Layout Type"
@@ -421,25 +423,14 @@ export function DesignerPage() {
             <FieldRow
               label="Height"
               control={
-                <div className="flex items-center gap-3 rounded-[var(--radius-md)] bg-[var(--surface-subtle)] px-3 py-2">
-                  <input
-                    type="range"
-                    min={MIN_DESIGN_FONT_SIZE}
-                    max={MAX_DESIGN_FONT_SIZE}
-                    step={1}
-                    value={selectedCharacter?.fontSize ?? 24}
-                    disabled={!selectedCharacter}
-                    onChange={(e) => {
-                      const next = clampFontSize(Number.parseInt(e.target.value, 10));
-                      if (!selectedCharacter) return;
-                      updateCharacter(selectedCharacter.id, { fontSize: next });
-                      markDirty();
-                    }}
-                    className="h-2 w-full cursor-pointer accent-[var(--accent-500)]"
-                  />
-                  <span className="w-10 text-right text-sm text-[var(--text-2)]">
-                    {selectedCharacter ? Math.round(selectedCharacter.fontSize) : '-'}
-                  </span>
+                <div className="space-y-1 rounded-[var(--radius-md)] bg-zinc-900 px-3 py-2">
+                  <div className="flex items-center justify-between text-sm text-zinc-300">
+                    <span>{selectedCharacter ? Math.round(selectedCharacter.fontSize) : '-'}</span>
+                    <span className="text-xs text-zinc-500">Manual Editor only</span>
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    Character height is edited in Manual Editor.
+                  </div>
                 </div>
               }
             />
@@ -506,7 +497,7 @@ export function DesignerPage() {
             />
           </div>
 
-          <div className="rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-elevated)] p-3 text-sm">
+          <div className="rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-200">
             <div className="flex items-center justify-between">
               <span>Total Modules</span>
               <strong>{totalModules}</strong>

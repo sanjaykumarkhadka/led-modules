@@ -3,6 +3,7 @@ import { MODULE_CATALOG, type LEDModule } from './catalog/modules';
 import { PSU_CATALOG, type PowerSupply } from './catalog/powerSupplies';
 import type { LEDPosition } from '../core/math/placement';
 import type { CharacterPath } from '../core/math/characterPaths';
+import type { CharacterShapeOverride } from '../core/math/shapeWarp';
 
 export interface TextBlock {
   id: string;
@@ -48,6 +49,13 @@ export interface ComputedLayoutData {
 }
 
 const CHAR_SPACING_RATIO = 0.76;
+const MIN_CHARACTER_FONT_SIZE = 96;
+const MAX_CHARACTER_FONT_SIZE = 240;
+
+function clampCharacterFontSize(value: number) {
+  if (!Number.isFinite(value)) return MIN_CHARACTER_FONT_SIZE;
+  return Math.min(MAX_CHARACTER_FONT_SIZE, Math.max(MIN_CHARACTER_FONT_SIZE, value));
+}
 
 function createId(prefix = 'char') {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -78,7 +86,7 @@ function createCharactersFromBlock(block: TextBlock, oldCharacters: CharacterEnt
       glyph,
       x: existing?.x ?? block.x + index * step,
       baselineY: existing?.baselineY ?? block.y,
-      fontSize: existing?.fontSize ?? block.fontSize,
+      fontSize: clampCharacterFontSize(existing?.fontSize ?? block.fontSize),
       language: existing?.language ?? block.language,
       order: index,
     };
@@ -112,6 +120,7 @@ interface ProjectState {
   placementModeOverrides: Record<string, 'auto' | 'manual'>;
   defaultPlacementMode: 'auto' | 'manual';
   manualLedOverrides: Record<string, ManualLED[]>;
+  charShapeOverrides: Record<string, CharacterShapeOverride>;
 
   // Engineering Data (Calculated)
   totalModules: number;
@@ -178,6 +187,9 @@ interface ProjectState {
   removeCharManualLed: (charId: string, ledId: string) => void;
   clearCharManualLeds: (charId: string) => void;
   getCharManualLeds: (charId: string) => ManualLED[];
+  setCharShapeOverride: (charId: string, shape: CharacterShapeOverride) => void;
+  clearCharShapeOverride: (charId: string) => void;
+  getCharShapeOverride: (charId: string) => CharacterShapeOverride | null;
 
   // Layout data action
   setComputedLayoutData: (data: ComputedLayoutData | null) => void;
@@ -188,7 +200,7 @@ interface ProjectState {
 
 const initialBlock: TextBlock = {
   id: '1',
-  text: 'HELLO',
+  text: '',
   x: 50,
   y: 200,
   fontSize: 150,
@@ -220,6 +232,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   placementModeOverrides: {},
   defaultPlacementMode: 'manual',
   manualLedOverrides: {},
+  charShapeOverrides: {},
 
   totalModules: 0,
   totalPowerWatts: 0,
@@ -235,7 +248,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const newY = lastBlock ? lastBlock.y + lastBlock.fontSize + 20 : 200;
       const block: TextBlock = {
         id: newId,
-        text: 'NEW TEXT',
+        text: '',
         x: 50,
         y: newY,
         fontSize: 150,
@@ -332,8 +345,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const current = sortByOrder(state.charactersByBlock[blockId] ?? []);
       const last = current[current.length - 1];
       const nextOrder = current.length;
-      const nextFontSize = last?.fontSize ?? block.fontSize;
-      const nextX = last ? last.x + last.fontSize * CHAR_SPACING_RATIO : block.x;
+      const nextFontSize = clampCharacterFontSize(last?.fontSize ?? block.fontSize);
+      const nextX = last ? last.x + clampCharacterFontSize(last.fontSize) * CHAR_SPACING_RATIO : block.x;
       const nextY = last?.baselineY ?? block.y;
       const id = createId(blockId);
       createdId = id;
@@ -375,12 +388,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         .filter((char) => char.id !== charId)
         .map((char, index) => ({ ...char, order: index }));
 
+      const { [charId]: _removedShape, ...restShapes } = state.charShapeOverrides ?? {};
+      void _removedShape;
       return {
         charactersByBlock: {
           ...state.charactersByBlock,
           [blockId]: nextChars,
         },
         selectedCharId: state.selectedCharId === charId ? null : state.selectedCharId,
+        charShapeOverrides: restShapes,
         blocks: state.blocks.map((b) =>
           b.id === blockId
             ? {
@@ -405,6 +421,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return {
             ...char,
             ...updates,
+            ...(updates.fontSize != null
+              ? { fontSize: clampCharacterFontSize(updates.fontSize) }
+              : {}),
           };
         });
         if (changed) changedBlockId = blockId;
@@ -588,6 +607,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   getCharManualLeds: (charId) => {
     const state = get();
     return state.manualLedOverrides?.[charId] || [];
+  },
+
+  setCharShapeOverride: (charId, shape) =>
+    set((state) => ({
+      charShapeOverrides: {
+        ...(state.charShapeOverrides ?? {}),
+        [charId]: shape,
+      },
+    })),
+
+  clearCharShapeOverride: (charId) =>
+    set((state) => {
+      const source = state.charShapeOverrides ?? {};
+      const { [charId]: _removed, ...rest } = source;
+      void _removed;
+      return { charShapeOverrides: rest };
+    }),
+
+  getCharShapeOverride: (charId) => {
+    const state = get();
+    return state.charShapeOverrides?.[charId] ?? null;
   },
 
   setComputedLayoutData: (data) => set({ computedLayoutData: data }),

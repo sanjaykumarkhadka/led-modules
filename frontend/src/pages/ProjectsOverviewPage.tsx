@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectsStore } from '../state/projectsStore';
 import type { Project } from '../api/projects';
@@ -9,7 +9,6 @@ import { Input } from '../components/ui/Input';
 import { useToast } from '../components/ui/ToastProvider';
 import { useConfirm } from '../components/ui/ConfirmProvider';
 import { EmptyState } from '../components/ui/EmptyState';
-import { InlineError } from '../components/ui/InlineError';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 
 export function ProjectsOverviewPage() {
@@ -34,10 +33,22 @@ export function ProjectsOverviewPage() {
     useProjectsStore();
   const { notify } = useToast();
   const { confirm } = useConfirm();
+  const lastErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  useEffect(() => {
+    if (!errorMessage) return;
+    if (errorMessage === lastErrorRef.current) return;
+    lastErrorRef.current = errorMessage;
+    notify({
+      variant: 'error',
+      title: 'Projects error',
+      description: errorMessage,
+    });
+  }, [errorMessage, notify]);
 
   const filteredProjects = projects.filter((project) => {
     if (!search.trim()) return true;
@@ -113,7 +124,6 @@ export function ProjectsOverviewPage() {
         </div>
       </header>
 
-      {errorMessage && <InlineError message={errorMessage} />}
       {loading && <p className="text-xs text-[var(--text-3)]">Loading your projects...</p>}
 
       {isEmpty ? (

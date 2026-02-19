@@ -6,7 +6,8 @@ export interface Project {
   name: string;
   description?: string;
   isFavorite?: boolean;
-  data: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  schemaVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -15,7 +16,6 @@ export interface ProjectPayload {
   name: string;
   description?: string;
   isFavorite?: boolean;
-  data: Record<string, unknown>;
 }
 
 export async function listProjects(
@@ -51,10 +51,10 @@ export async function getProject(
 export async function updateProject(
   accessToken: string,
   id: string,
-  payload: ProjectPayload,
+  payload: Partial<ProjectPayload>,
 ): Promise<Project> {
   return http<Project>(`/projects/${id}`, {
-    method: 'PUT',
+    method: 'PATCH',
     body: payload,
     accessToken,
   });

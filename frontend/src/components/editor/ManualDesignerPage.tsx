@@ -7,19 +7,27 @@ import {
   type CharacterPath,
 } from '../../core/math/characterPaths';
 import type { ManualLED } from '../../data/store';
-import { isCapsuleInside, isPointInside } from '../../core/math/geometry';
+import { isCapsuleInside } from '../../core/math/geometry';
 import { useToast } from '../ui/ToastProvider';
 import { useConfirm } from '../ui/ConfirmProvider';
-import { InlineError } from '../ui/InlineError';
 import { useProjectsStore } from '../../state/projectsStore';
+import { createShapeGeometryAdapter } from './geometry/shapeGeometryAdapter';
+import { ManualKonvaCanvas } from './konva/ManualKonvaCanvas';
+import { USE_KONVA_MANUAL_EDITOR } from '../../config/featureFlags';
+import { MAX_LED_SCALE, MIN_LED_SCALE } from '../canvas/konva/editorPolicies';
+import {
+  createIdentityShapeOverride,
+  normalizeShapeOverride,
+  warpPathDataWithOverride,
+  type CharacterShapeOverride,
+} from '../../core/math/shapeWarp';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
   'M152.924,300.748c84.319,0,152.912-68.6,152.912-152.918c0-39.476-15.312-77.231-42.346-105.564 c0,0,3.938-8.857,8.814-19.783c4.864-10.926-2.138-18.636-15.648-17.228l-79.125,8.289c-13.511,1.411-17.999,11.467-10.021,22.461 l46.741,64.393c7.986,10.992,17.834,12.31,22.008,2.937l7.56-16.964c12.172,18.012,18.976,39.329,18.976,61.459 c0,60.594-49.288,109.875-109.87,109.875c-60.591,0-109.882-49.287-109.882-109.875c0-19.086,4.96-37.878,14.357-54.337 c5.891-10.325,2.3-23.467-8.025-29.357c-10.328-5.896-23.464-2.3-29.36,8.031C6.923,95.107,0,121.27,0,147.829 C0,232.148,68.602,300.748,152.924,300.748z';
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
-const MAX_ZOOM_IN_FACTOR = 0.18;
-
+const MAX_ZOOM_IN_FACTOR = 0.5;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 const createLedId = () => {
@@ -71,6 +79,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
   const setCharManualLeds = useProjectStore((state) => state.setCharManualLeds);
+  const getCharShapeOverride = useProjectStore((state) => state.getCharShapeOverride);
+  const setCharShapeOverride = useProjectStore((state) => state.setCharShapeOverride);
   const currentModule = useProjectStore((state) => state.getCurrentModule());
   const projects = useProjectsStore((state) => state.projects);
   const saveCurrentProject = useProjectsStore((state) => state.saveCurrentProject);
@@ -78,6 +88,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const { notify } = useToast();
   const { confirm } = useConfirm();
   const editorCharId = charId;
+  const [editorMode, setEditorMode] = useState<'module' | 'shape'>('module');
 
   const [snapEnabled] = useState(false);
   const [gridSize] = useState(2);
@@ -93,11 +104,12 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const [baseViewBox, setBaseViewBox] = useState<ViewBox | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [invalidLedIds, setInvalidLedIds] = useState<Set<string>>(new Set());
+  const [draftShapeOverride, setDraftShapeOverride] = useState<CharacterShapeOverride | null>(null);
+  const [selectedMeshPointIndex, setSelectedMeshPointIndex] = useState<number | null>(null);
   const [groupSpacing, setGroupSpacing] = useState(1);
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
-  const [groupLayoutMode, setGroupLayoutMode] = useState<'line' | 'grid' | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const groupSpacingRef = useRef(1);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     selectedLedIdsRef.current = selectedLedIds;
@@ -106,6 +118,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
+  const geometryAdapterRef = useRef<ReturnType<typeof createShapeGeometryAdapter> | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     leadId: string;
@@ -185,7 +198,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     });
   }, [blocks, charactersByBlock, fonts]);
 
-  const charPath = useMemo(() => {
+  const baseCharPath = useMemo(() => {
     if (!editorCharId) return null;
     for (const block of blockCharPaths) {
       const matched = block.charPaths.find((cp) => cp.charId === editorCharId);
@@ -205,7 +218,35 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   const charVisualScale = useMemo(() => clamp(activeBlockFontSize / 150, 0.05, 3), [activeBlockFontSize]);
 
-  const bbox = charPath?.bbox || null;
+  const baseBBox = useMemo(() => {
+    if (!baseCharPath) return null;
+    return (
+      baseCharPath.bbox ?? {
+        x: baseCharPath.x,
+        y: 0,
+        width: Math.max(1, baseCharPath.width || activeBlockFontSize * 0.7),
+        height: Math.max(1, activeBlockFontSize),
+      }
+    );
+  }, [activeBlockFontSize, baseCharPath]);
+
+  useEffect(() => {
+    if (!editorCharId || !baseBBox) return;
+    const persisted = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
+    queueMicrotask(() => {
+      setDraftShapeOverride(persisted);
+      setSelectedMeshPointIndex(null);
+    });
+  }, [baseBBox, editorCharId, getCharShapeOverride]);
+
+  const renderedPath = useMemo(() => {
+    if (!baseCharPath || !baseBBox) return null;
+    const persisted = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
+    const active = editorMode === 'shape' ? normalizeShapeOverride(draftShapeOverride ?? undefined, baseBBox) : persisted;
+    return warpPathDataWithOverride(baseCharPath.pathData, active);
+  }, [baseBBox, baseCharPath, draftShapeOverride, editorCharId, editorMode, getCharShapeOverride]);
+
+  const bbox = renderedPath?.bbox || baseBBox || null;
   const [pathBounds, setPathBounds] = useState<{
     x: number;
     y: number;
@@ -242,7 +283,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       }
     });
     return () => cancelAnimationFrame(handle);
-  }, [charPath?.pathData, editorCharId]);
+  }, [renderedPath?.pathData, editorCharId]);
 
   useEffect(() => {
     const source = pathBounds || bbox;
@@ -281,6 +322,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     if (!container || !viewBox) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
+      // Manual editor allows zooming out only.
+      if (e.deltaY < 0) return;
       const svg = svgRef.current;
       if (!svg) return;
       const pt = svg.createSVGPoint();
@@ -290,7 +333,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       if (!ctm) return;
       const transformed = pt.matrixTransform(ctm.inverse());
       const point = { x: transformed.x, y: transformed.y };
-      const factor = e.deltaY > 0 ? 1.03 : 0.97;
+      const factor = 1.03;
       const next = zoomViewBox(viewBox, factor, point);
       setViewBox(clampViewBoxToBase(next));
     };
@@ -314,6 +357,28 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     if (!source) return undefined;
     return `translate(${-source.x} ${-source.y})`;
   }, [bbox, pathBounds]);
+
+  const pathOffset = useMemo(() => {
+    const source = pathBounds || bbox;
+    if (!source) return { x: 0, y: 0 };
+    return { x: source.x, y: source.y };
+  }, [bbox, pathBounds]);
+
+  useEffect(() => {
+    if (!geometryAdapterRef.current) {
+      geometryAdapterRef.current = createShapeGeometryAdapter();
+    }
+    return () => {
+      geometryAdapterRef.current?.dispose();
+      geometryAdapterRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const adapter = geometryAdapterRef.current;
+    if (!adapter) return;
+    adapter.setPath(renderedPath?.pathData || '');
+  }, [renderedPath?.pathData]);
 
   const BASE_LED_WIDTH = 12;
   const BASE_LED_HEIGHT = 5;
@@ -453,18 +518,10 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   );
 
   const addLedAtPoint = useCallback(
-    (point: { x: number; y: number }, rotation = 0, forceInsideBounds = false, scale?: number) => {
+    (point: { x: number; y: number }, rotation = 0, scale?: number) => {
       if (!localBounds) return;
-      if (!pathRef.current && !forceInsideBounds) return;
       const snapped = snapPoint(point);
-      if (
-        !forceInsideBounds &&
-        pathRef.current &&
-        !isCapsuleInside(pathRef.current, snapped.x, snapped.y, rotation, 6 * charVisualScale)
-      ) {
-        return;
-      }
-      const normalized = toManual(snapped);
+      const normalized = toManualUnclamped(snapped);
       const newLed: ManualLED = {
         id: createLedId(),
         u: normalized.u,
@@ -476,7 +533,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       setSelectedLedIds(new Set([newLed.id]));
       setIsDirty(true);
     },
-    [charVisualScale, localBounds, snapPoint, toManual]
+    [localBounds, snapPoint, toManualUnclamped]
   );
 
   const handleLedPointerDown = useCallback(
@@ -597,7 +654,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       const dy = point.y - resize.startY;
       const localDx = dx * cos + dy * sin;
       const localDy = -dx * sin + dy * cos;
-      const minScale = 0.15;
+      const minScale = MIN_LED_SCALE;
       let scaleDelta = 0;
       switch (resize.handle) {
         case 'se':
@@ -613,32 +670,9 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           scaleDelta = (-localDx / BASE_LED_WIDTH - localDy / BASE_LED_HEIGHT) / 2;
           break;
       }
-      const newScale = Math.max(minScale, resize.startScale + scaleDelta);
-      const scaleDiff = newScale - resize.startScale;
-      const du = (BASE_LED_WIDTH * scaleDiff) / (2 * localBounds.width);
-      const dv = (BASE_LED_HEIGHT * scaleDiff) / (2 * localBounds.height);
-      let newU = resize.startU;
-      let newV = resize.startV;
-      switch (resize.handle) {
-        case 'se':
-          newU = resize.startU + du;
-          newV = resize.startV + dv;
-          break;
-        case 'sw':
-          newU = resize.startU - du;
-          newV = resize.startV + dv;
-          break;
-        case 'ne':
-          newU = resize.startU + du;
-          newV = resize.startV - dv;
-          break;
-        case 'nw':
-          newU = resize.startU - du;
-          newV = resize.startV - dv;
-          break;
-      }
+      const newScale = Math.min(MAX_LED_SCALE, Math.max(minScale, resize.startScale + scaleDelta));
       setDraftLeds((prev) =>
-        prev.map((l) => (l.id === resize.ledId ? { ...l, u: newU, v: newV, scale: newScale } : l))
+        prev.map((l) => (l.id === resize.ledId ? { ...l, scale: newScale } : l))
       );
       setIsDirty(true);
     },
@@ -764,7 +798,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         const point = getSvgPoint(event);
         if (!point) return;
         if (tool === 'add') {
-          addLedAtPoint(point, 0, true);
+          addLedAtPoint(point, 0);
           return;
         }
         if (!viewBox) return;
@@ -784,7 +818,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           event.currentTarget.setPointerCapture(event.pointerId);
         } else {
           clearSelection();
-          if (event.shiftKey || tool === 'pan') {
+          if (tool === 'pan') {
             panRef.current = {
               pointerId: event.pointerId,
               start: point,
@@ -907,13 +941,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     ]
   );
 
-  const handleZoomIn = useCallback(() => {
-    if (!viewBox) return;
-    const center = { x: viewBox.x + viewBox.width / 2, y: viewBox.y + viewBox.height / 2 };
-    const next = zoomViewBox(viewBox, 0.9, center);
-    setViewBox(clampViewBoxToBase(next));
-  }, [clampViewBoxToBase, viewBox]);
-
   const handleFit = useCallback(() => {
     if (!baseViewBox) return;
     setViewBox(baseViewBox);
@@ -927,7 +954,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           x: localBounds.x + localBounds.width / 2,
           y: localBounds.y + localBounds.height / 2,
         };
-    addLedAtPoint(center, 0, true);
+    addLedAtPoint(center, 0);
   }, [addLedAtPoint, localBounds, viewBox]);
 
   const handleDuplicateSelected = useCallback(() => {
@@ -1011,37 +1038,38 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     });
   }, [selectedLedIds, draftLeds]);
 
-  const GROUP_SPACING_MIN = 0;
-  const GROUP_SPACING_MAX = 20;
-  const GROUP_SCALE_MIN = 0.15;
-  const GROUP_SCALE_MAX = 3;
+  useEffect(() => {
+    groupSpacingRef.current = groupSpacing;
+  }, [groupSpacing]);
+
+  const GROUP_SPACING_MIN = 0.5;
+  const GROUP_SPACING_MAX = 1.2;
+  const GROUP_SCALE_MIN = 0.5;
+  const GROUP_SCALE_MAX = MAX_LED_SCALE;
   const GROUP_ANGLE_MIN = 0;
   const GROUP_ANGLE_MAX = 360;
 
-  /** Apply spacing to current selection. Layout inferred from bounds if not provided. */
+  /** Apply spacing to current selection.
+   *  - Slider (no layout arg): preserve current arrangement, scale distances from group center.
+   *  - Explicit layout actions: arrange in horizontal/vertical line.
+   */
   const applyGroupSpacing = useCallback(
-    (spacing: number, layout?: 'horizontal' | 'vertical') => {
+    (spacingOrFactor: number, layout?: 'horizontal' | 'vertical') => {
       if (!localBounds || !alignBounds || selectedAbsoluteLeds.length < 2) return;
-      const horizontal =
-        layout ??
-        (alignBounds.right - alignBounds.left >= alignBounds.bottom - alignBounds.top
-          ? 'horizontal'
-          : 'vertical');
-
-      if (horizontal === 'horizontal') {
-        const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.x - b.x);
-        const totalWidth =
-          sorted.reduce((sum, led) => sum + led.w, 0) + (sorted.length - 1) * spacing;
-        let x = alignBounds.centerX - totalWidth / 2;
-        const y = alignBounds.centerY;
+      if (layout == null) {
+        const centerX =
+          selectedAbsoluteLeds.reduce((sum, led) => sum + led.x, 0) / selectedAbsoluteLeds.length;
+        const centerY =
+          selectedAbsoluteLeds.reduce((sum, led) => sum + led.y, 0) / selectedAbsoluteLeds.length;
+        const factor = spacingOrFactor;
         const updates = new Map<string, { u: number; v: number }>();
-        for (const led of sorted) {
-          x += led.w / 2;
+        for (const led of selectedAbsoluteLeds) {
+          const x = centerX + (led.x - centerX) * factor;
+          const y = centerY + (led.y - centerY) * factor;
           updates.set(led.id, {
             u: (x - localBounds.x) / localBounds.width,
             v: (y - localBounds.y) / localBounds.height,
           });
-          x += led.w / 2 + spacing;
         }
         setDraftLeds((prev) =>
           prev.map((led) => {
@@ -1050,20 +1078,42 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
             return { ...led, ...uv };
           })
         );
-      } else {
+      } else if (layout === 'horizontal') {
+        const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.x - b.x);
+        const totalWidth =
+          sorted.reduce((sum, led) => sum + led.w, 0) + (sorted.length - 1) * spacingOrFactor;
+        let x = alignBounds.centerX - totalWidth / 2;
+        const y = alignBounds.centerY;
+        const updates = new Map<string, { u: number; v: number }>();
+        for (const led of sorted) {
+          x += led.w / 2;
+          updates.set(led.id, {
+            u: clamp01((x - localBounds.x) / localBounds.width),
+            v: clamp01((y - localBounds.y) / localBounds.height),
+          });
+          x += led.w / 2 + spacingOrFactor;
+        }
+        setDraftLeds((prev) =>
+          prev.map((led) => {
+            const uv = updates.get(led.id);
+            if (uv == null) return led;
+            return { ...led, ...uv };
+          })
+        );
+      } else if (layout === 'vertical') {
         const sorted = [...selectedAbsoluteLeds].sort((a, b) => a.y - b.y);
         const totalHeight =
-          sorted.reduce((sum, led) => sum + led.h, 0) + (sorted.length - 1) * spacing;
+          sorted.reduce((sum, led) => sum + led.h, 0) + (sorted.length - 1) * spacingOrFactor;
         let y = alignBounds.centerY - totalHeight / 2;
         const x = alignBounds.centerX;
         const updates = new Map<string, { u: number; v: number }>();
         for (const led of sorted) {
           y += led.h / 2;
           updates.set(led.id, {
-            u: (x - localBounds.x) / localBounds.width,
-            v: (y - localBounds.y) / localBounds.height,
+            u: clamp01((x - localBounds.x) / localBounds.width),
+            v: clamp01((y - localBounds.y) / localBounds.height),
           });
-          y += led.h / 2 + spacing;
+          y += led.h / 2 + spacingOrFactor;
         }
         setDraftLeds((prev) =>
           prev.map((led) => {
@@ -1074,7 +1124,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         );
       }
       setIsDirty(true);
-      setGroupLayoutMode('line');
     },
     [alignBounds, localBounds, selectedAbsoluteLeds]
   );
@@ -1098,6 +1147,20 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     setDraftLeds((prev) => prev.map((led) => (ids.has(led.id) ? { ...led, scale: clamped } : led)));
     setIsDirty(true);
   }, []);
+
+  const handleGroupSpacingInput = useCallback(
+    (value: number) => {
+      if (!Number.isFinite(value)) return;
+      const prev = groupSpacingRef.current || 1;
+      const factor = value / prev;
+      groupSpacingRef.current = value;
+      setGroupSpacing(value);
+      if (selectedAbsoluteLeds.length >= 2 && Math.abs(factor - 1) > 0.0001) {
+        applyGroupSpacing(factor);
+      }
+    },
+    [applyGroupSpacing, selectedAbsoluteLeds.length]
+  );
 
   const handleGroupAngleChange = useCallback((value: number) => {
     const deg = Number(value);
@@ -1153,8 +1216,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         const y = originY + row * (avgH + spacing);
 
         updates.set(led.id, {
-          u: (x - localBounds.x) / localBounds.width,
-          v: (y - localBounds.y) / localBounds.height,
+          u: clamp01((x - localBounds.x) / localBounds.width),
+          v: clamp01((y - localBounds.y) / localBounds.height),
         });
       });
 
@@ -1172,8 +1235,117 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   const handleArrangeGrid = useCallback(() => {
     arrangeGrid();
-    setGroupLayoutMode('grid');
   }, [arrangeGrid]);
+
+  const getOutOfBoundsLedIds = useCallback(
+    (leds: ManualLED[]) => {
+      const failedIds = new Set<string>();
+      if (!localBounds) return failedIds;
+      const pathEl = pathRef.current ?? geometryAdapterRef.current?.getPathElement() ?? null;
+      if (!pathEl) return failedIds;
+
+      for (const led of leds) {
+        const x = localBounds.x + led.u * localBounds.width;
+        const y = localBounds.y + led.v * localBounds.height;
+        const rotation = led.rotation ?? 0;
+        if (!isCapsuleInside(pathEl, x, y, rotation, 6 * charVisualScale)) {
+          failedIds.add(led.id);
+        }
+      }
+      return failedIds;
+    },
+    [charVisualScale, localBounds]
+  );
+
+  useEffect(() => {
+    // Show invalid highlight only after an explicit save attempt.
+    if (invalidLedIds.size > 0) {
+      queueMicrotask(() => setInvalidLedIds(new Set()));
+    }
+  }, [draftLeds, invalidLedIds.size]);
+
+  const handleUpdateMeshPoint = useCallback((index: number, point: { x: number; y: number }) => {
+    setDraftShapeOverride((prev) => {
+      if (!prev) return prev;
+      if (index < 0 || index >= prev.mesh.points.length) return prev;
+      const points = prev.mesh.points.map((p, i) => (i === index ? { x: point.x, y: point.y } : p));
+      return {
+        ...prev,
+        mesh: {
+          ...prev.mesh,
+          points,
+        },
+      };
+    });
+  }, []);
+
+  const handleResetShape = useCallback(() => {
+    if (!baseBBox) return;
+    setDraftShapeOverride(createIdentityShapeOverride(baseBBox));
+    setSelectedMeshPointIndex(null);
+  }, [baseBBox]);
+
+  const handleSaveShape = useCallback(async () => {
+    if (!editorCharId || !baseCharPath || !baseBBox || !draftShapeOverride) return;
+    const existingProject = projects.find((p) => p._id === projectId);
+    const projectName = existingProject?.name?.trim() || 'Untitled project';
+    const projectDescription = existingProject?.description;
+
+    const persistedShape = normalizeShapeOverride(getCharShapeOverride(editorCharId) ?? undefined, baseBBox);
+    const oldWarped = warpPathDataWithOverride(baseCharPath.pathData, persistedShape);
+    const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox);
+    const nextWarped = warpPathDataWithOverride(baseCharPath.pathData, nextShape);
+    const oldBBox = oldWarped.bbox;
+    const newBBox = nextWarped.bbox;
+    const safeW = Math.max(1e-6, newBBox.width);
+    const safeH = Math.max(1e-6, newBBox.height);
+
+    const remapped = draftLeds.map((led) => {
+      const absX = oldBBox.x + led.u * oldBBox.width;
+      const absY = oldBBox.y + led.v * oldBBox.height;
+      return {
+        ...led,
+        u: (absX - newBBox.x) / safeW,
+        v: (absY - newBBox.y) / safeH,
+      };
+    });
+
+    setDraftLeds(remapped);
+    setCharManualLeds(editorCharId, remapped);
+    setCharShapeOverride(editorCharId, nextShape);
+    setIsDirty(true);
+    setEditorMode('module');
+    setSelectedMeshPointIndex(null);
+
+    await saveCurrentProject(projectName, projectDescription);
+    const saveErr = useProjectsStore.getState().errorMessage;
+    if (saveErr) {
+      notify({
+        variant: 'error',
+        title: 'Failed to persist shape',
+        description: saveErr,
+      });
+      return;
+    }
+    notify({
+      variant: 'success',
+      title: 'Shape saved',
+      description: 'Character geometry updated and synced.',
+    });
+  }, [
+    baseBBox,
+    baseCharPath,
+    draftLeds,
+    draftShapeOverride,
+    editorCharId,
+    getCharShapeOverride,
+    notify,
+    projectId,
+    projects,
+    saveCurrentProject,
+    setCharManualLeds,
+    setCharShapeOverride,
+  ]);
 
   const handleSave = useCallback(async () => {
     if (!editorCharId) return;
@@ -1197,43 +1369,17 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       onBack();
       return;
     }
-    const margin = 0.001;
-    const failedIds = new Set<string>();
-
-    for (const led of draftLeds) {
-      if (led.u < -margin || led.u > 1 + margin || led.v < -margin || led.v > 1 + margin) {
-        failedIds.add(led.id);
-        continue;
-      }
-      if (pathRef.current) {
-        const x = localBounds.x + led.u * localBounds.width;
-        const y = localBounds.y + led.v * localBounds.height;
-        let inFill: boolean;
-        try {
-          const bbox = pathRef.current.getBBox();
-          const localX = bbox.x + x;
-          const localY = bbox.y + y;
-          inFill = isPointInside(pathRef.current, localX, localY);
-        } catch {
-          inFill = true;
-        }
-        if (!inFill) failedIds.add(led.id);
-      }
-    }
+    const failedIds = getOutOfBoundsLedIds(draftLeds);
 
     if (failedIds.size > 0) {
       setInvalidLedIds(failedIds);
-      setSaveError(
-        `${failedIds.size} module(s) are outside the character. Move highlighted modules inside the outline before saving.`
-      );
       notify({
         variant: 'error',
         title: 'Cannot save manual layout',
-        description: 'One or more modules are outside the character.',
+        description: `${failedIds.size} module(s) are outside the character. Move highlighted modules inside the outline before saving.`,
       });
       return;
     }
-    setSaveError(null);
     const confirmed = await confirm({
       title: 'Save manual placement?',
       description: 'This character manual layout will be saved to the project.',
@@ -1265,6 +1411,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     projects,
     saveCurrentProject,
     setCharManualLeds,
+    getOutOfBoundsLedIds,
   ]);
 
   const handleCancel = useCallback(() => {
@@ -1274,35 +1421,68 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="relative min-h-screen isolate text-[var(--text-1)]">
-      <div
-        className="absolute inset-0 pointer-events-none bg-[var(--surface-app)]"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(148,163,184,0.18) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(148,163,184,0.18) 1px, transparent 1px)
-          `,
-          backgroundSize: '10px 10px',
-        }}
-        aria-hidden
-      />
+    <div className="relative min-h-screen isolate bg-[#09090b] p-0 text-zinc-100 [--surface-app:#09090b] [--surface-canvas:#09090b] [--surface-panel:#111111] [--surface-elevated:#171717] [--surface-subtle:#0f0f10] [--surface-strong:#222225] [--text-1:#f4f4f5] [--text-2:#d4d4d8] [--text-3:#a1a1aa] [--text-4:#71717a] [--border-1:#27272a] [--border-2:#3f3f46] [--stage-bg:#0b0b0c] [--stage-grid-line:rgba(161,161,170,0.2)]">
       <div className="relative z-10 flex h-full min-h-0">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="h-16 shrink-0 border-b border-[var(--border-1)] bg-[var(--surface-canvas)] flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 rounded-xl bg-[var(--surface-subtle)] flex items-center justify-center text-xl font-bold">
-                {charPath?.char || '·'}
+                {baseCharPath?.char || '·'}
               </div>
               <div>
                 <div className="text-sm text-[var(--text-3)]">Manual Designer</div>
                 <div className="text-lg font-semibold">
-                  {charPath?.char || 'Character'} · {editorCharId}
+                  {baseCharPath?.char || 'Character'} · {editorCharId}
                 </div>
                 <div className="text-xs text-[var(--text-3)]">Project {projectId}</div>
               </div>
               {isDirty && <span className="text-xs text-[var(--warning-300)]">Unsaved changes</span>}
             </div>
             <div className="flex items-center gap-2">
+              <div className="mr-2 inline-flex rounded-lg border border-[var(--border-1)] bg-[var(--surface-elevated)] p-1">
+                <button
+                  type="button"
+                  onClick={() => setEditorMode('module')}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    editorMode === 'module'
+                      ? 'bg-[var(--text-1)] text-[var(--surface-app)]'
+                      : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
+                  }`}
+                >
+                  Module Mode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditorMode('shape')}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    editorMode === 'shape'
+                      ? 'bg-[var(--text-1)] text-[var(--surface-app)]'
+                      : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
+                  }`}
+                >
+                  Shape Mode
+                </button>
+              </div>
+              {editorMode === 'shape' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleResetShape}
+                    className="px-3 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)] text-sm"
+                  >
+                    Reset shape
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSaveShape();
+                    }}
+                    className="px-3 py-2 rounded-lg bg-[var(--accent-500)] text-white text-sm font-semibold hover:bg-[var(--accent-600)]"
+                  >
+                    Save Shape
+                  </button>
+                </>
+              )}
               <button
                 onClick={handleCancel}
                 className="px-4 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]"
@@ -1313,19 +1493,13 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                 onClick={() => {
                   void handleSave();
                 }}
-                disabled={projectsSaving}
+                disabled={projectsSaving || editorMode === 'shape'}
                 className="px-4 py-2 rounded-lg bg-[var(--accent-500)] text-white font-semibold hover:bg-[var(--accent-600)]"
               >
                 {projectsSaving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
-          {saveError && (
-            <div className="px-6 pt-4">
-              <InlineError message={saveError} />
-            </div>
-          )}
-
           <div className="flex-1 grid grid-cols-[1fr_320px] min-h-0">
             <div
               ref={canvasContainerRef}
@@ -1347,19 +1521,49 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                 </div>
               )}
               {!loading && localBounds && viewBox && (
-                <svg
-                  ref={svgRef}
-                  className="w-full h-full max-w-[85vw] max-h-[85vh]"
-                  viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
-                  preserveAspectRatio="xMidYMid meet"
-                  style={{ touchAction: 'none' }}
-                  onPointerDown={handleCanvasPointerDown}
-                  onPointerMove={handleCanvasPointerMove}
-                  onPointerUp={handleCanvasPointerUp}
-                >
+                USE_KONVA_MANUAL_EDITOR ? (
+                  <div className="w-full h-full max-w-[85vw] max-h-[85vh]">
+                    <ManualKonvaCanvas
+                      editorMode={editorMode}
+                      tool={tool}
+                      setTool={setTool}
+                      isPanning={isPanning}
+                      setIsPanning={setIsPanning}
+                      viewBox={viewBox}
+                      setViewBox={setViewBox}
+                      clampViewBoxToBase={clampViewBoxToBase}
+                      localBounds={localBounds}
+                      pathData={renderedPath?.pathData || ''}
+                      pathOffset={pathOffset}
+                      draftLeds={draftLeds}
+                      setDraftLeds={setDraftLeds}
+                      selectedLedIds={selectedLedIds}
+                      setSelectedLedIds={setSelectedLedIds}
+                      invalidLedIds={invalidLedIds}
+                      charVisualScale={charVisualScale}
+                      snapEnabled={snapEnabled}
+                      gridSize={gridSize}
+                      setIsDirty={setIsDirty}
+                      shapeOverride={editorMode === 'shape' ? draftShapeOverride : null}
+                      selectedMeshPointIndex={selectedMeshPointIndex}
+                      onSelectMeshPoint={setSelectedMeshPointIndex}
+                      onUpdateMeshPoint={handleUpdateMeshPoint}
+                    />
+                  </div>
+                ) : (
+                  <svg
+                    ref={svgRef}
+                    className="w-full h-full max-w-[85vw] max-h-[85vh]"
+                    viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
+                    preserveAspectRatio="xMidYMid meet"
+                    style={{ touchAction: 'none' }}
+                    onPointerDown={handleCanvasPointerDown}
+                    onPointerMove={handleCanvasPointerMove}
+                    onPointerUp={handleCanvasPointerUp}
+                  >
                   <path
                     ref={pathRef}
-                    d={charPath?.pathData || ''}
+                    d={renderedPath?.pathData || ''}
                     transform={pathTransform}
                     fill="rgba(148,163,184,0.08)"
                     stroke="rgba(148,163,184,0.5)"
@@ -1666,34 +1870,64 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                         </g>
                       );
                     })()}
-                </svg>
+                  </svg>
+                )
               )}
             </div>
 
             <div className="bg-[var(--surface-panel)] border-l border-[var(--border-1)] p-5 space-y-5 overflow-y-auto">
-              <div className="space-y-2">
-                <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Module Specs</div>
-                <div className="bg-[var(--surface-elevated)] rounded-xl p-4 text-sm space-y-1 border border-[var(--border-1)]">
-                  <div className="flex justify-between">
-                    <span className="text-[var(--text-3)]">Module</span>
-                    <span className="text-[var(--text-1)] font-semibold">{currentModule.name}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[var(--text-3)]">Voltage</span>
-                    <span className="text-[var(--text-1)]">{currentModule.voltage}V</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[var(--text-3)]">Watts</span>
-                    <span className="text-[var(--text-1)]">{currentModule.wattsPerModule} W</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-[var(--text-3)]">Total</span>
-                    <span className="text-[var(--text-1)]">{totalWatts.toFixed(1)} W</span>
+              {editorMode === 'module' ? (
+                <div className="space-y-2">
+                  <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Module Specs</div>
+                  <div className="bg-[var(--surface-elevated)] rounded-xl p-4 text-sm space-y-1 border border-[var(--border-1)]">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Module</span>
+                      <span className="text-[var(--text-1)] font-semibold">{currentModule.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Voltage</span>
+                      <span className="text-[var(--text-1)]">{currentModule.voltage}V</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Watts</span>
+                      <span className="text-[var(--text-1)]">{currentModule.wattsPerModule} W</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Total</span>
+                      <span className="text-[var(--text-1)]">{totalWatts.toFixed(1)} W</span>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Shape Properties</div>
+                  <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 text-sm space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Mesh</span>
+                      <span className="text-[var(--text-1)]">{draftShapeOverride?.mesh.rows ?? 4} x {draftShapeOverride?.mesh.cols ?? 4}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[var(--text-3)]">Nodes</span>
+                      <span className="text-[var(--text-1)]">{draftShapeOverride?.mesh.points.length ?? 0}</span>
+                    </div>
+                    {selectedMeshPointIndex != null && draftShapeOverride?.mesh.points[selectedMeshPointIndex] && (
+                      <div className="pt-2 border-t border-[var(--border-1)]">
+                        <div className="text-[var(--text-3)] text-xs mb-1">Selected node</div>
+                        <div className="flex justify-between text-[var(--text-2)]">
+                          <span>X</span>
+                          <span>{draftShapeOverride.mesh.points[selectedMeshPointIndex].x.toFixed(1)}</span>
+                        </div>
+                        <div className="flex justify-between text-[var(--text-2)]">
+                          <span>Y</span>
+                          <span>{draftShapeOverride.mesh.points[selectedMeshPointIndex].y.toFixed(1)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
-              {selectedLedIds.size >= 2 && (
+              {editorMode === 'module' && selectedLedIds.size >= 2 && (
                 <div className="space-y-2">
                   <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Group</div>
                   <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 space-y-4 text-sm">
@@ -1710,34 +1944,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                         max={GROUP_SPACING_MAX}
                         step={0.1}
                         value={groupSpacing}
-                        onChange={(e) => {
-                          const v = parseFloat(e.currentTarget.value);
-                          if (Number.isFinite(v)) {
-                            setGroupSpacing(v);
-                            if (selectedAbsoluteLeds.length >= 2) {
-                              if (groupLayoutMode === 'grid') {
-                                arrangeGrid(v);
-                                setGroupLayoutMode('grid');
-                              } else {
-                                applyGroupSpacing(v);
-                              }
-                            }
-                          }
-                        }}
-                        onInput={(e) => {
-                          const v = parseFloat((e.target as HTMLInputElement).value);
-                          if (Number.isFinite(v)) {
-                            setGroupSpacing(v);
-                            if (selectedAbsoluteLeds.length >= 2) {
-                              if (groupLayoutMode === 'grid') {
-                                arrangeGrid(v);
-                                setGroupLayoutMode('grid');
-                              } else {
-                                applyGroupSpacing(v);
-                              }
-                            }
-                          }
-                        }}
+                        onChange={(e) => handleGroupSpacingInput(parseFloat(e.currentTarget.value))}
                         className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
                       />
                     </div>
@@ -1786,7 +1993,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                 </div>
               )}
 
-              <div className="space-y-2">
+              {editorMode === 'module' && <div className="space-y-2">
                 <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">
                   Design Controls
                 </div>
@@ -1795,6 +2002,23 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                     <span>LED Count</span>
                     <span className="text-[var(--text-1)] font-semibold">{draftLeds.length}</span>
                   </div>
+                  {invalidLedIds.size > 0 && (
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-[var(--danger-400)]">
+                        Out of bounds: {invalidLedIds.size}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedLedIds(new Set(invalidLedIds));
+                          setTool('select');
+                        }}
+                        className="rounded-md border border-[var(--border-1)] bg-[var(--surface-strong)] px-2 py-1 text-[var(--text-2)] hover:text-[var(--text-1)]"
+                      >
+                        Select invalid
+                      </button>
+                    </div>
+                  )}
                   <button
                     onClick={async () => {
                       const shouldClear = await confirm({
@@ -1813,38 +2037,18 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                     Clear all modules
                   </button>
                 </div>
-              </div>
+              </div>}
             </div>
           </div>
         </div>
       </div>
 
       {/* Tetra-like left tool rail */}
-      <div
+      {editorMode === 'module' && <div
         className="absolute left-4 top-1/2 z-20 -translate-y-1/2 flex flex-col items-center gap-1 rounded-2xl border border-[var(--border-1)] bg-[var(--surface-elevated)] px-2 py-2 shadow-[var(--shadow-md)]"
         role="toolbar"
       >
         <div className="flex flex-col items-center gap-0.5">
-          <button
-            type="button"
-            title="Pan canvas"
-            onClick={() => setTool('pan')}
-            className={`p-2.5 rounded-xl transition-colors ${tool === 'pan' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 11v6a2 2 0 01-2 2H8a2 2 0 01-2-2v-6" />
-              <path d="M14 5v6a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h8a2 2 0 012 2z" />
-            </svg>
-          </button>
           <button
             type="button"
             title="Box select — drag on canvas to select all modules in the box"
@@ -1906,28 +2110,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
             >
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            title="Zoom in"
-            onClick={handleZoomIn}
-            className="p-2.5 rounded-xl text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)] transition-colors"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              <line x1="11" y1="8" x2="11" y2="14" />
-              <line x1="8" y1="11" x2="14" y2="11" />
             </svg>
           </button>
           <button
@@ -2076,7 +2258,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
             )}
           </>
         )}
-      </div>
+      </div>}
     </div>
   );
 };

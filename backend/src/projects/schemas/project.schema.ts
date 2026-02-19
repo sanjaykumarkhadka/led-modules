@@ -15,9 +15,15 @@ export class Project extends Document {
   @Prop({ type: Boolean, default: false })
   isFavorite: boolean;
 
-  // Serialized LED design data; keep flexible for now
-  @Prop({ type: Object, required: true })
+  // Legacy design blob kept for migration compatibility only.
+  @Prop({ type: Object, required: false })
   data: Record<string, unknown>;
+
+  @Prop({ type: Number, default: 2 })
+  schemaVersion: number;
 }
 
 export const ProjectSchema = SchemaFactory.createForClass(Project);
+ProjectSchema.index({ ownerId: 1, updatedAt: -1 });
+ProjectSchema.index({ ownerId: 1, isFavorite: 1, updatedAt: -1 });
+ProjectSchema.index({ ownerId: 1, name: 1 });

@@ -21,9 +21,10 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
   const isProjectsListRoute = location.pathname === '/projects' || location.pathname === '/favorites';
   const isManualEditorRoute = location.pathname.includes('/manual/');
   const isProjectDetailsRoute = isDesignerRoute && !isManualEditorRoute;
+  const isDarkWorkspaceRoute = isProjectsListRoute || isProjectDetailsRoute || isManualEditorRoute;
 
   useEffect(() => {
-    if (isProjectsListRoute) {
+    if (isDarkWorkspaceRoute) {
       document.body.classList.add('route-projects-dark');
       return () => {
         document.body.classList.remove('route-projects-dark');
@@ -31,10 +32,10 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
     }
     document.body.classList.remove('route-projects-dark');
     return undefined;
-  }, [isProjectsListRoute]);
+  }, [isDarkWorkspaceRoute]);
 
   return (
-    <div className={`min-h-screen ${isProjectsListRoute ? 'bg-[#09090b] text-zinc-50' : 'text-[var(--text-1)]'}`}>
+    <div className={`min-h-screen ${isDarkWorkspaceRoute ? 'bg-[#09090b] text-zinc-50' : 'text-[var(--text-1)]'}`}>
       {!isManualEditorRoute && (
         <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-900/85 backdrop-blur-sm">
           <div className="mx-auto flex h-16 w-full max-w-[1680px] items-center justify-between gap-4 px-4 md:px-6">

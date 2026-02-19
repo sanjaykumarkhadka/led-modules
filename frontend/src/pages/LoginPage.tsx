@@ -3,7 +3,6 @@ import { useState } from 'react';
 interface LoginPageProps {
   email: string;
   password: string;
-  errorMessage?: string | null;
   onSubmit: (email: string, password: string) => Promise<void> | void;
 }
 
@@ -95,7 +94,6 @@ function FeatureCard({
 export function LoginPage({
   email,
   password,
-  errorMessage,
   onSubmit,
 }: LoginPageProps) {
   const [localEmail, setLocalEmail] = useState(email || 'test@example.com');
@@ -188,7 +186,6 @@ export function LoginPage({
                   required
                 />
               </div>
-              {errorMessage ? <p className="text-xs text-rose-400">{errorMessage}</p> : null}
               <button
                 type="submit"
                 className="inline-flex h-10 w-full items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-zinc-950"

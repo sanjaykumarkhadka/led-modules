@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Card } from './components/ui/Card';
 import { AppLayout } from './components/layout/AppLayout';
@@ -7,10 +7,13 @@ import { DesignerPage } from './pages/DesignerPage';
 import { ManualEditorRoutePage } from './pages/ManualEditorRoutePage';
 import { useAuthStore } from './state/authStore';
 import { LoginPage } from './pages/LoginPage';
+import { useToast } from './components/ui/ToastProvider';
 
 function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const { notify } = useToast();
+  const lastAuthErrorRef = useRef<string | null>(null);
 
   const { user, status: authStatus, errorMessage: authError, login, logout, bootstrap } =
     useAuthStore();
@@ -18,6 +21,17 @@ function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    if (!authError) return;
+    if (authError === lastAuthErrorRef.current) return;
+    lastAuthErrorRef.current = authError;
+    notify({
+      variant: 'error',
+      title: 'Authentication failed',
+      description: authError,
+    });
+  }, [authError, notify]);
 
   const handleAuthSubmit = async (nextEmail: string, nextPassword: string) => {
     setEmail(nextEmail);
@@ -43,7 +57,6 @@ function App() {
       <LoginPage
         email={email}
         password={password}
-        errorMessage={authError}
         onSubmit={handleAuthSubmit}
       />
     );
