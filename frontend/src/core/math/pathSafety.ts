@@ -131,7 +131,7 @@ function stats(points: Point[]) {
 
 function escapesBounds(candidate: Bounds, base: Bounds) {
   const diagonal = Math.hypot(base.width, base.height);
-  const epsilon = Math.max(0.5, diagonal * 0.01);
+  const epsilon = Math.max(3, diagonal * 0.06);
   const minX = base.x - epsilon;
   const minY = base.y - epsilon;
   const maxX = base.x + base.width + epsilon;
@@ -179,7 +179,7 @@ export function validatePathEdit(
 
   if (
     previousStats.total > 0 &&
-    candidateStats.total > previousStats.total * 2.25
+    candidateStats.total > previousStats.total * 3.5
   ) {
     return {
       ok: false,
@@ -193,7 +193,7 @@ export function validatePathEdit(
     };
   }
 
-  const segmentThreshold = Math.max(previousStats.medianSeg * 8, baseDiagonal * 1.25);
+  const segmentThreshold = Math.max(previousStats.medianSeg * 14, baseDiagonal * 2.2);
   if (candidateStats.maxSeg > segmentThreshold) {
     return {
       ok: false,

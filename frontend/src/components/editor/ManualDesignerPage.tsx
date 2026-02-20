@@ -400,6 +400,17 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     };
   }, [bbox, fixedLocalBounds, pathBounds]);
 
+  const shapeEditBounds = useMemo(() => {
+    const source = pathBounds || bbox || null;
+    if (!source) return null;
+    return {
+      x: source.x,
+      y: source.y,
+      width: source.width,
+      height: source.height,
+    };
+  }, [bbox, pathBounds]);
+
   const pathTransform = useMemo(() => {
     const source = pathBounds || bbox;
     if (!source) return undefined;
@@ -1336,7 +1347,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
       setDraftShapeOverride((prev) => {
         const sourcePath = prev?.outerPath || renderedPath?.pathData || '';
         if (!sourcePath) return prev;
-        const bounds = fixedLocalBounds ?? localBounds ?? baseBBox ?? prev?.bbox;
+        const bounds = shapeEditBounds ?? baseBBox ?? prev?.bbox;
         const clampedPoint = bounds
           ? {
               x: clamp(point.x, bounds.x, bounds.x + bounds.width),
@@ -1362,13 +1373,16 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           notify({
             variant: 'error',
             title: 'Move blocked',
-            description: 'This move would create an invalid shape.',
+            description:
+              blockedReason === 'bbox_escape'
+                ? 'Point must stay inside the editable shape bounds.'
+                : 'This move would create an invalid shape.',
           });
           lastShapeBlockToastAtRef.current = now;
         }
       }
     },
-    [baseBBox, fixedLocalBounds, localBounds, notify, renderedPath?.pathData]
+    [baseBBox, notify, renderedPath?.pathData, shapeEditBounds]
   );
 
   const handleResetShape = useCallback(() => {
@@ -1401,7 +1415,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     const saveValidation = validatePathEdit(
       lastValidShapePathRef.current || oldWarped.pathData,
       nextWarped.pathData,
-      fixedLocalBounds ?? localBounds ?? baseBBox
+      shapeEditBounds ?? baseBBox
     );
     if (!saveValidation.ok) {
       notify({
@@ -1528,6 +1542,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     draftLeds,
     editorCharId,
     localBounds,
+    shapeEditBounds,
     notify,
     onBack,
     projectId,
