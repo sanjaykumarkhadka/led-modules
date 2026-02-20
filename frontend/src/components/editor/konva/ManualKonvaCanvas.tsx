@@ -56,6 +56,8 @@ export interface ManualKonvaCanvasProps {
   selectedShapePointId: string | null;
   onSelectShapePoint: (id: string | null) => void;
   onUpdateShapePoint: (id: string, point: { x: number; y: number }) => void;
+  showShapeDebug?: boolean;
+  anchorDebugCountById?: Record<string, number>;
 }
 
 function createLedId() {
@@ -90,6 +92,8 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   selectedShapePointId,
   onSelectShapePoint,
   onUpdateShapePoint,
+  showShapeDebug = false,
+  anchorDebugCountById,
 }) => {
   const { theme } = useTheme();
   const telemetry = useInteractionTelemetry('manual-stage');
@@ -817,50 +821,76 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                 const fill = selected ? '#2563eb' : '#f8fafc';
                 const stroke = selected ? '#f8fafc' : '#2563eb';
                 return (
-                  <Circle
-                    key={point.id}
-                    x={point.x}
-                    y={point.y}
-                    radius={radius}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={selected ? 1.1 : 0.9}
-                    draggable={editorMode === 'shape'}
-                    onMouseDown={() => {
-                      if (editorMode !== 'shape') return;
-                      onSelectShapePoint(point.id);
-                    }}
-                    onDragStart={() => {
-                      if (editorMode !== 'shape') return;
-                      onSelectShapePoint(point.id);
-                    }}
-                    onDragMove={(evt) => {
-                      if (editorMode !== 'shape') return;
-                      const pos = evt.target.position();
-                      pendingShapeDragRef.current = {
-                        id: point.id,
-                        point: { x: pos.x, y: pos.y },
-                      };
-                      if (shapeDragRafRef.current != null) return;
-                      shapeDragRafRef.current = requestAnimationFrame(() => {
-                        const pending = pendingShapeDragRef.current;
-                        shapeDragRafRef.current = null;
+                  <Group key={point.id}>
+                    {showShapeDebug && (anchorDebugCountById?.[point.id] ?? 1) > 1 && (
+                      <>
+                        <Circle
+                          x={point.x}
+                          y={point.y}
+                          radius={4}
+                          stroke="#22d3ee"
+                          strokeWidth={0.9}
+                          dash={[2, 2]}
+                          fillEnabled={false}
+                          listening={false}
+                        />
+                        <Rect
+                          x={point.x + 3}
+                          y={point.y - 5}
+                          width={8}
+                          height={6}
+                          cornerRadius={2}
+                          fill="rgba(14,116,144,0.9)"
+                          stroke="#67e8f9"
+                          strokeWidth={0.6}
+                          listening={false}
+                        />
+                      </>
+                    )}
+                    <Circle
+                      x={point.x}
+                      y={point.y}
+                      radius={radius}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth={selected ? 1.1 : 0.9}
+                      draggable={editorMode === 'shape'}
+                      onMouseDown={() => {
+                        if (editorMode !== 'shape') return;
+                        onSelectShapePoint(point.id);
+                      }}
+                      onDragStart={() => {
+                        if (editorMode !== 'shape') return;
+                        onSelectShapePoint(point.id);
+                      }}
+                      onDragMove={(evt) => {
+                        if (editorMode !== 'shape') return;
+                        const pos = evt.target.position();
+                        pendingShapeDragRef.current = {
+                          id: point.id,
+                          point: { x: pos.x, y: pos.y },
+                        };
+                        if (shapeDragRafRef.current != null) return;
+                        shapeDragRafRef.current = requestAnimationFrame(() => {
+                          const pending = pendingShapeDragRef.current;
+                          shapeDragRafRef.current = null;
+                          pendingShapeDragRef.current = null;
+                          if (!pending) return;
+                          onUpdateShapePoint(pending.id, pending.point);
+                        });
+                      }}
+                      onDragEnd={(evt) => {
+                        if (editorMode !== 'shape') return;
+                        if (shapeDragRafRef.current != null) {
+                          cancelAnimationFrame(shapeDragRafRef.current);
+                          shapeDragRafRef.current = null;
+                        }
+                        const pos = evt.target.position();
                         pendingShapeDragRef.current = null;
-                        if (!pending) return;
-                        onUpdateShapePoint(pending.id, pending.point);
-                      });
-                    }}
-                    onDragEnd={(evt) => {
-                      if (editorMode !== 'shape') return;
-                      if (shapeDragRafRef.current != null) {
-                        cancelAnimationFrame(shapeDragRafRef.current);
-                        shapeDragRafRef.current = null;
-                      }
-                      const pos = evt.target.position();
-                      pendingShapeDragRef.current = null;
-                      onUpdateShapePoint(point.id, { x: pos.x, y: pos.y });
-                    }}
-                  />
+                        onUpdateShapePoint(point.id, { x: pos.x, y: pos.y });
+                      }}
+                    />
+                  </Group>
                 );
               })}
             </Group>

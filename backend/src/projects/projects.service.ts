@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { Project } from './schemas/project.schema';
@@ -8,6 +8,7 @@ import { ProjectCharacter } from './schemas/project-character.schema';
 import { CharacterShapeOverride } from './schemas/character-shape-override.schema';
 import { CharacterModule } from './schemas/character-module.schema';
 import { CharacterOverride } from './schemas/character-override.schema';
+import { validateShapePathPayload } from './shape-validation.util';
 
 interface ProjectMetaPayload {
   name: string;
@@ -109,6 +110,19 @@ export class ProjectsService {
       .exec();
     if (!project) throw new NotFoundException('Project not found');
     return project;
+  }
+
+  private validateShapePayload(payload: {
+    outerPath?: string;
+    bbox?: { x: number; y: number; width: number; height: number };
+  }) {
+    const validation = validateShapePathPayload(payload);
+    if (!validation.ok) {
+      throw new BadRequestException({
+        code: validation.code,
+        message: validation.message ?? 'Invalid shape payload.',
+      });
+    }
   }
 
   async listForUser(userId: string) {
@@ -358,6 +372,7 @@ export class ProjectsService {
       mesh?: { rows: number; cols: number; points: Array<{ x: number; y: number }> };
     },
   ) {
+    this.validateShapePayload({ outerPath: payload.outerPath, bbox: payload.bbox });
     const project = await this.assertProjectOwned(userId, projectId);
     const setPayload: Record<string, unknown> = {
       version: payload.version ?? 2,
@@ -464,6 +479,7 @@ export class ProjectsService {
       scale?: number;
     }>,
   ) {
+    this.validateShapePayload({ outerPath: shape.outerPath, bbox: shape.bbox });
     const project = await this.assertProjectOwned(userId, projectId);
     await this.withOptionalTransaction(async (session) => {
       const shapeSetPayload: Record<string, unknown> = {

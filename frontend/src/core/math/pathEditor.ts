@@ -12,6 +12,7 @@ export interface EditablePathPoint {
   kind: EditablePathPointKind;
   x: number;
   y: number;
+  contourIndex: number;
   segmentIndex: number;
   xValueIndex: number;
   yValueIndex: number;
@@ -19,9 +20,19 @@ export interface EditablePathPoint {
 
 export interface MoveEditableAnchorPointSafeResult {
   accepted: boolean;
+  severity?: import('./pathSafety').PathValidationSeverity;
   reason?: import('./pathSafety').PathEditRejectReason;
+  warningReason?: import('./pathSafety').PathEditRejectReason;
   pathData: string;
   points: EditablePathPoint[];
+}
+
+export interface EditableAnchorDebugGroup {
+  representativeId: string;
+  contourIndex: number;
+  x: number;
+  y: number;
+  memberIds: string[];
 }
 
 const TOKEN_RE = /([a-zA-Z])|([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/g;
@@ -247,13 +258,19 @@ function serializeSegments(segments: Segment[]) {
 
 function buildEditablePointsFromSegments(segments: Segment[]) {
   const points: EditablePathPoint[] = [];
+  let contourIndex = -1;
   segments.forEach((segment, segmentIndex) => {
+    if (segment.cmd === 'M') {
+      contourIndex += 1;
+    }
+    const currentContour = Math.max(0, contourIndex);
     if (segment.cmd === 'M' || segment.cmd === 'L') {
       points.push({
         id: `${segmentIndex}:anchor:0:1`,
         kind: 'anchor',
         x: segment.values[0],
         y: segment.values[1],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 0,
         yValueIndex: 1,
@@ -266,6 +283,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'anchor',
         x: segment.values[5],
         y: segment.values[6],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 5,
         yValueIndex: 6,
@@ -278,6 +296,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'control1',
         x: segment.values[0],
         y: segment.values[1],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 0,
         yValueIndex: 1,
@@ -287,6 +306,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'anchor',
         x: segment.values[2],
         y: segment.values[3],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 2,
         yValueIndex: 3,
@@ -299,6 +319,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'control1',
         x: segment.values[0],
         y: segment.values[1],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 0,
         yValueIndex: 1,
@@ -308,6 +329,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'control2',
         x: segment.values[2],
         y: segment.values[3],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 2,
         yValueIndex: 3,
@@ -317,6 +339,7 @@ function buildEditablePointsFromSegments(segments: Segment[]) {
         kind: 'anchor',
         x: segment.values[4],
         y: segment.values[5],
+        contourIndex: currentContour,
         segmentIndex,
         xValueIndex: 4,
         yValueIndex: 5,
@@ -332,7 +355,42 @@ export function buildEditablePathPoints(pathData: string) {
 }
 
 export function buildEditableAnchorPoints(pathData: string) {
-  return buildEditablePathPoints(pathData).filter((point) => point.kind === 'anchor');
+  const anchors = buildEditablePathPoints(pathData).filter((point) => point.kind === 'anchor');
+  const seen = new Map<string, EditablePathPoint>();
+  const precision = 100;
+  for (const point of anchors) {
+    // Avoid stacked duplicate nodes for the same contour corner.
+    const key = `${point.contourIndex}:${Math.round(point.x * precision)}:${Math.round(point.y * precision)}`;
+    if (!seen.has(key)) {
+      seen.set(key, point);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+export function buildEditableAnchorDebugGroups(pathData: string): EditableAnchorDebugGroup[] {
+  const anchors = buildEditablePathPoints(pathData).filter((point) => point.kind === 'anchor');
+  const precision = 100;
+  const groups = new Map<
+    string,
+    { representative: EditablePathPoint; members: EditablePathPoint[] }
+  >();
+  for (const point of anchors) {
+    const key = `${point.contourIndex}:${Math.round(point.x * precision)}:${Math.round(point.y * precision)}`;
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { representative: point, members: [point] });
+      continue;
+    }
+    existing.members.push(point);
+  }
+  return Array.from(groups.values()).map((group) => ({
+    representativeId: group.representative.id,
+    contourIndex: group.representative.contourIndex,
+    x: group.representative.x,
+    y: group.representative.y,
+    memberIds: group.members.map((m) => m.id),
+  }));
 }
 
 export function moveEditablePathPoint(pathData: string, pointId: string, next: { x: number; y: number }) {
@@ -389,7 +447,11 @@ export function moveEditableAnchorPointSafe(
       previousPath: string,
       candidatePath: string,
       bounds?: { x: number; y: number; width: number; height: number }
-    ) => { ok: boolean; reason?: import('./pathSafety').PathEditRejectReason };
+    ) => {
+      ok: boolean;
+      severity?: import('./pathSafety').PathValidationSeverity;
+      reason?: import('./pathSafety').PathEditRejectReason;
+    };
   }
 ): MoveEditableAnchorPointSafeResult {
   const segments = parsePathToAbsoluteSegments(pathData);
@@ -407,11 +469,29 @@ export function moveEditableAnchorPointSafe(
   const currentY = segment.values[point.yValueIndex];
   const dx = next.x - currentX;
   const dy = next.y - currentY;
-
-  translateIncomingControl(segment, point, dx, dy);
-  segment.values[point.xValueIndex] = next.x;
-  segment.values[point.yValueIndex] = next.y;
-  translateOutgoingControl(segments[point.segmentIndex + 1], dx, dy);
+  const linked = points.filter((candidate) => {
+    if (candidate.kind !== 'anchor') return false;
+    if (candidate.contourIndex !== point.contourIndex) return false;
+    return Math.hypot(candidate.x - point.x, candidate.y - point.y) <= 0.01;
+  });
+  const targets = linked.length > 0 ? linked : [point];
+  const updatedAnchorKeys = new Set<string>();
+  for (const target of targets) {
+    const targetSegment = segments[target.segmentIndex];
+    if (!targetSegment) continue;
+    const targetKey = `${target.segmentIndex}:${target.xValueIndex}:${target.yValueIndex}`;
+    if (updatedAnchorKeys.has(targetKey)) continue;
+    updatedAnchorKeys.add(targetKey);
+    translateIncomingControl(targetSegment, target, dx, dy);
+    const isPrimary = target.id === point.id;
+    targetSegment.values[target.xValueIndex] = isPrimary
+      ? next.x
+      : targetSegment.values[target.xValueIndex] + dx;
+    targetSegment.values[target.yValueIndex] = isPrimary
+      ? next.y
+      : targetSegment.values[target.yValueIndex] + dy;
+    translateOutgoingControl(segments[target.segmentIndex + 1], dx, dy);
+  }
 
   const candidatePath = serializeSegments(segments);
   if (options?.validate) {
@@ -419,15 +499,26 @@ export function moveEditableAnchorPointSafe(
     if (!verdict.ok) {
       return {
         accepted: false,
+        severity: verdict.severity ?? 'error',
         reason: verdict.reason,
         pathData,
         points: buildEditableAnchorPoints(pathData),
+      };
+    }
+    if (verdict.severity === 'warn') {
+      return {
+        accepted: true,
+        severity: 'warn',
+        warningReason: verdict.reason,
+        pathData: candidatePath,
+        points: buildEditableAnchorPoints(candidatePath),
       };
     }
   }
 
   return {
     accepted: true,
+    severity: 'ok',
     pathData: candidatePath,
     points: buildEditableAnchorPoints(candidatePath),
   };

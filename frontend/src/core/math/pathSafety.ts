@@ -1,3 +1,4 @@
+import { extractContours, sampleContourPoints } from './pathContours';
 import { pathBBoxFromPathData } from './shapeWarp';
 
 export type PathEditRejectReason =
@@ -6,61 +7,23 @@ export type PathEditRejectReason =
   | 'bbox_escape'
   | 'degenerate_segment';
 
+export type PathValidationSeverity = 'ok' | 'warn' | 'error';
+
 export interface PathEditValidationResult {
   ok: boolean;
+  severity: PathValidationSeverity;
   reason?: PathEditRejectReason;
   metrics?: {
     candidateLength?: number;
     previousLength?: number;
     maxSegment?: number;
     previousMedianSegment?: number;
+    contourCount?: number;
   };
 }
 
 type Point = { x: number; y: number };
 type Bounds = { x: number; y: number; width: number; height: number };
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function isFinitePoint(point: Point) {
-  return Number.isFinite(point.x) && Number.isFinite(point.y);
-}
-
-function samplePathPoints(pathData: string): Point[] {
-  if (typeof document === 'undefined' || !pathData) return [];
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const path = document.createElementNS(svgNS, 'path');
-  path.setAttribute('d', pathData);
-  let totalLength = 0;
-  try {
-    totalLength = path.getTotalLength();
-  } catch {
-    return [];
-  }
-  if (!Number.isFinite(totalLength) || totalLength <= 0) return [];
-  const samples = clamp(Math.ceil(totalLength / 8), 32, 320);
-  const points: Point[] = [];
-  for (let i = 0; i <= samples; i += 1) {
-    const at = (i / samples) * totalLength;
-    const p = path.getPointAtLength(at);
-    const next = { x: p.x, y: p.y };
-    if (!isFinitePoint(next)) continue;
-    const prev = points[points.length - 1];
-    if (prev && Math.hypot(prev.x - next.x, prev.y - next.y) < 1e-5) continue;
-    points.push(next);
-  }
-  return points;
-}
-
-function polylineSegments(points: Point[]) {
-  const segments: Array<{ a: Point; b: Point }> = [];
-  for (let i = 0; i < points.length - 1; i += 1) {
-    segments.push({ a: points[i], b: points[i + 1] });
-  }
-  return segments;
-}
 
 function segmentLength(a: Point, b: Point) {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -86,7 +49,6 @@ function intersects(a1: Point, a2: Point, b1: Point, b2: Point) {
   const o2 = orientation(a1, a2, b2);
   const o3 = orientation(b1, b2, a1);
   const o4 = orientation(b1, b2, a2);
-
   if (o1 !== o2 && o3 !== o4) return true;
   if (o1 === 0 && onSegment(a1, b1, a2)) return true;
   if (o2 === 0 && onSegment(a1, b2, a2)) return true;
@@ -95,15 +57,24 @@ function intersects(a1: Point, a2: Point, b1: Point, b2: Point) {
   return false;
 }
 
-function hasSelfIntersection(points: Point[]) {
-  const segments = polylineSegments(points);
+function polylineSegments(points: Point[], closed: boolean) {
+  const segments: Array<{ a: Point; b: Point }> = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    segments.push({ a: points[i], b: points[i + 1] });
+  }
+  if (closed && points.length > 2) {
+    segments.push({ a: points[points.length - 1], b: points[0] });
+  }
+  return segments;
+}
+
+function hasSelfIntersection(points: Point[], closed: boolean) {
+  const segments = polylineSegments(points, closed);
   for (let i = 0; i < segments.length; i += 1) {
     const s1 = segments[i];
-    for (let j = i + 2; j < segments.length; j += 1) {
-      // Neighbor segments share endpoints; ignore.
-      if (j === i + 1) continue;
-      // Ignore first/last pair in closed-ish traces.
-      if (i === 0 && j === segments.length - 1) continue;
+    for (let j = i + 1; j < segments.length; j += 1) {
+      if (Math.abs(i - j) <= 1) continue;
+      if (closed && i === 0 && j === segments.length - 1) continue;
       const s2 = segments[j];
       if (intersects(s1.a, s1.b, s2.a, s2.b)) return true;
     }
@@ -111,22 +82,22 @@ function hasSelfIntersection(points: Point[]) {
   return false;
 }
 
-function stats(points: Point[]) {
+function stats(points: Point[], closed: boolean) {
   if (points.length < 2) {
     return { total: 0, maxSeg: 0, medianSeg: 0 };
   }
+  const segments = polylineSegments(points, closed);
   const lengths: number[] = [];
   let total = 0;
   let maxSeg = 0;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const len = segmentLength(points[i], points[i + 1]);
+  for (const segment of segments) {
+    const len = segmentLength(segment.a, segment.b);
     lengths.push(len);
     total += len;
     maxSeg = Math.max(maxSeg, len);
   }
   const sorted = [...lengths].sort((a, b) => a - b);
-  const medianSeg = sorted[Math.floor(sorted.length / 2)] ?? 0;
-  return { total, maxSeg, medianSeg };
+  return { total, maxSeg, medianSeg: sorted[Math.floor(sorted.length / 2)] ?? 0 };
 }
 
 function escapesBounds(candidate: Bounds, base: Bounds) {
@@ -144,76 +115,96 @@ function escapesBounds(candidate: Bounds, base: Bounds) {
   );
 }
 
+function severityResult(
+  severity: PathValidationSeverity,
+  reason?: PathEditRejectReason,
+  metrics?: PathEditValidationResult['metrics']
+): PathEditValidationResult {
+  return { ok: severity !== 'error', severity, reason, metrics };
+}
+
 export function validatePathEdit(
   previousPath: string,
   candidatePath: string,
-  baseBBox?: Bounds
+  baseBBox?: Bounds,
+  options?: { strict?: boolean }
 ): PathEditValidationResult {
-  if (!candidatePath.trim()) return { ok: false, reason: 'degenerate_segment' };
+  const strict = Boolean(options?.strict);
+  if (!candidatePath.trim()) return severityResult('error', 'degenerate_segment');
   const candidateBBox = pathBBoxFromPathData(candidatePath) ?? baseBBox;
-  if (!candidateBBox) return { ok: false, reason: 'degenerate_segment' };
+  if (!candidateBBox) return severityResult('error', 'degenerate_segment');
   if (
     !Number.isFinite(candidateBBox.width) ||
     !Number.isFinite(candidateBBox.height) ||
     candidateBBox.width < 1e-3 ||
     candidateBBox.height < 1e-3
   ) {
-    return { ok: false, reason: 'degenerate_segment' };
+    return severityResult('error', 'degenerate_segment');
   }
   if (baseBBox && escapesBounds(candidateBBox, baseBBox)) {
-    return { ok: false, reason: 'bbox_escape' };
+    return severityResult(strict ? 'error' : 'warn', 'bbox_escape');
   }
 
-  const candidatePoints = samplePathPoints(candidatePath);
-  if (candidatePoints.length < 4) {
-    return { ok: false, reason: 'degenerate_segment' };
+  const candidateContours = extractContours(candidatePath);
+  if (candidateContours.length === 0) {
+    return severityResult('error', 'degenerate_segment');
   }
-  if (hasSelfIntersection(candidatePoints)) {
-    return { ok: false, reason: 'self_intersection' };
-  }
+  const previousContours = extractContours(previousPath);
 
-  const previousPoints = samplePathPoints(previousPath);
-  const candidateStats = stats(candidatePoints);
-  const previousStats = stats(previousPoints.length > 1 ? previousPoints : candidatePoints);
+  let candidateTotal = 0;
+  let previousTotal = 0;
+  let candidateMaxSeg = 0;
+  let previousMedianSeg = 0;
   const baseDiagonal = Math.hypot(candidateBBox.width, candidateBBox.height);
 
-  if (
-    previousStats.total > 0 &&
-    candidateStats.total > previousStats.total * 3.5
-  ) {
-    return {
-      ok: false,
-      reason: 'curvature_spike',
-      metrics: {
-        candidateLength: candidateStats.total,
-        previousLength: previousStats.total,
-        maxSegment: candidateStats.maxSeg,
-        previousMedianSegment: previousStats.medianSeg,
-      },
-    };
+  for (let i = 0; i < candidateContours.length; i += 1) {
+    const contour = candidateContours[i];
+    const sampled = sampleContourPoints(contour);
+    if (sampled.length < 3) return severityResult('error', 'degenerate_segment');
+    if (hasSelfIntersection(sampled, contour.closed)) {
+      return severityResult(strict ? 'error' : 'warn', 'self_intersection', {
+        contourCount: candidateContours.length,
+      });
+    }
+    const contourStats = stats(sampled, contour.closed);
+    candidateTotal += contourStats.total;
+    candidateMaxSeg = Math.max(candidateMaxSeg, contourStats.maxSeg);
+
+    const prevContour = previousContours[i];
+    if (prevContour) {
+      const prevStats = stats(sampleContourPoints(prevContour), prevContour.closed);
+      previousTotal += prevStats.total;
+      previousMedianSeg = Math.max(previousMedianSeg, prevStats.medianSeg);
+    }
   }
 
-  const segmentThreshold = Math.max(previousStats.medianSeg * 14, baseDiagonal * 2.2);
-  if (candidateStats.maxSeg > segmentThreshold) {
-    return {
-      ok: false,
-      reason: 'curvature_spike',
-      metrics: {
-        candidateLength: candidateStats.total,
-        previousLength: previousStats.total,
-        maxSegment: candidateStats.maxSeg,
-        previousMedianSegment: previousStats.medianSeg,
-      },
-    };
+  if (previousTotal > 0 && candidateTotal > previousTotal * 3.5) {
+    return severityResult(strict ? 'error' : 'warn', 'curvature_spike', {
+      candidateLength: candidateTotal,
+      previousLength: previousTotal,
+      maxSegment: candidateMaxSeg,
+      previousMedianSegment: previousMedianSeg,
+      contourCount: candidateContours.length,
+    });
   }
 
-  return {
-    ok: true,
-    metrics: {
-      candidateLength: candidateStats.total,
-      previousLength: previousStats.total,
-      maxSegment: candidateStats.maxSeg,
-      previousMedianSegment: previousStats.medianSeg,
-    },
-  };
+  const segmentThreshold = Math.max(previousMedianSeg * 14, baseDiagonal * 2.2);
+  if (candidateMaxSeg > segmentThreshold) {
+    const ratio = segmentThreshold > 0 ? candidateMaxSeg / segmentThreshold : 0;
+    return severityResult(ratio > 2.5 || strict ? 'error' : 'warn', 'curvature_spike', {
+      candidateLength: candidateTotal,
+      previousLength: previousTotal,
+      maxSegment: candidateMaxSeg,
+      previousMedianSegment: previousMedianSeg,
+      contourCount: candidateContours.length,
+    });
+  }
+
+  return severityResult('ok', undefined, {
+    candidateLength: candidateTotal,
+    previousLength: previousTotal,
+    maxSegment: candidateMaxSeg,
+    previousMedianSegment: previousMedianSeg,
+    contourCount: candidateContours.length,
+  });
 }
