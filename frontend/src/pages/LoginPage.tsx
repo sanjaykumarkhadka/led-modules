@@ -31,6 +31,35 @@ function ArrowRightIcon() {
   );
 }
 
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
+      <path
+        d="M3 3l18 18M10.6 10.6A3 3 0 0 0 14.8 14.8M9.9 5.2A11.2 11.2 0 0 1 12 5c6.5 0 10 7 10 7a17.7 17.7 0 0 1-4.2 4.8M6.3 6.4C3.5 8.3 2 12 2 12s3.5 6 10 6c1.5 0 2.8-.3 4-.8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function FeatureIcon({ kind }: { kind: 'grid' | 'settings' | 'file' }) {
   if (kind === 'grid') {
     return (
@@ -98,6 +127,7 @@ export function LoginPage({
 }: LoginPageProps) {
   const [localEmail, setLocalEmail] = useState(email || 'test@example.com');
   const [localPassword, setLocalPassword] = useState(password || 'password');
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="flex min-h-screen w-full overflow-hidden bg-[#09090b] text-zinc-50">
@@ -177,14 +207,24 @@ export function LoginPage({
                 <label htmlFor="password" className="text-sm text-zinc-300">
                   Password
                 </label>
-                <input
-                  id="password"
-                  type="password"
-                  value={localPassword}
-                  onChange={(e) => setLocalPassword(e.target.value)}
-                  className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={localPassword}
+                    onChange={(e) => setLocalPassword(e.target.value)}
+                    className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+                    required
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 inline-flex items-center justify-center px-3 text-zinc-400 transition-colors hover:text-zinc-200 focus:outline-none"
+                  >
+                    {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                  </button>
+                </div>
               </div>
               <button
                 type="submit"

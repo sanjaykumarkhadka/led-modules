@@ -14,6 +14,7 @@ import { useProjectsStore } from '../../state/projectsStore';
 import { useAuthStore } from '../../state/authStore';
 import { createShapeGeometryAdapter } from './geometry/shapeGeometryAdapter';
 import { ManualKonvaCanvas } from './konva/ManualKonvaCanvas';
+import { ShapePaperCanvas } from './paper/ShapePaperCanvas';
 import { USE_KONVA_MANUAL_EDITOR } from '../../config/featureFlags';
 import { MAX_LED_SCALE, MIN_LED_SCALE } from '../canvas/konva/editorPolicies';
 import {
@@ -31,7 +32,6 @@ import {
 } from '../../core/math/pathEditor';
 import {
   validatePathEdit,
-  type PathEditRejectReason,
   type PathEditValidationResult,
 } from '../../core/math/pathSafety';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
@@ -136,12 +136,9 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const [showShapeDebug, setShowShapeDebug] = useState(false);
-  const [pendingValidationWarning, setPendingValidationWarning] = useState<PathEditRejectReason | null>(null);
   const [lastShapeValidation, setLastShapeValidation] = useState<PathEditValidationResult | null>(null);
   const groupSpacingRef = useRef(1);
   const lastShapeBlockToastAtRef = useRef(0);
-  const lastShapeWarnToastAtRef = useRef(0);
-  const lastShapeWarnKeyRef = useRef<string | null>(null);
   const lastValidShapePathRef = useRef<string | null>(null);
   const shapeAnchorOriginRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const shapeAnchorOriginCharIdRef = useRef<string | null>(null);
@@ -380,6 +377,9 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   useEffect(() => {
     if (editorMode !== 'shape') {
       if (shapeSessionFrame) setShapeSessionFrame(null);
+      // Clear the baseline so ShapePaperCanvas re-seeds it when shape mode is
+      // entered again (Paper.js may produce a different normalised string next time).
+      lastValidShapePathRef.current = null;
       return;
     }
     if (shapeSessionFrame) return;
@@ -1417,7 +1417,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const handleUpdateShapePoint = useCallback(
     (pointId: string, point: { x: number; y: number }) => {
       let blockedReason: string | undefined;
-      let warningReason: PathEditRejectReason | undefined;
       setDraftShapeOverride((prev) => {
         const sourcePath = prev?.outerPath || renderedPath?.pathData || '';
         if (!sourcePath) return prev;
@@ -1442,7 +1441,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
           blockedReason = 'bbox_escape';
           return prev;
         }
-        warningReason = updated.warningReason;
         const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
         if (!nextBBox) return prev;
         lastValidShapePathRef.current = updated.pathData;
@@ -1463,22 +1461,59 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
         }
         return;
       }
-      if (warningReason) {
-        setPendingValidationWarning(warningReason);
-        const now = Date.now();
-        const warningKey = `${pointId}:${warningReason}`;
-        if (warningKey !== lastShapeWarnKeyRef.current || now - lastShapeWarnToastAtRef.current > 1200) {
-          notify({
-            variant: 'info',
-            title: 'Potential geometry issue',
-            description: 'Move applied, but verify shape before saving.',
-          });
-          lastShapeWarnToastAtRef.current = now;
-          lastShapeWarnKeyRef.current = warningKey;
-        }
-      } else {
-        setPendingValidationWarning(null);
+    },
+    [baseBBox, notify, renderedPath?.pathData, shapeEditBounds]
+  );
+
+  /**
+   * Called by ShapePaperCanvas after it has parsed the initial path data.
+   * Paper.js normalises the SVG string (e.g. rounds coordinates, rewrites
+   * commands), so we seed the validator baseline with that normalised form to
+   * prevent the first real drag from being compared against a structurally
+   * different string.
+   */
+  const handleShapeEditorReady = useCallback((normalizedPathData: string) => {
+    if (!normalizedPathData) return;
+    lastValidShapePathRef.current = normalizedPathData;
+    // Also sync the draft so the rest of the app sees the normalised form.
+    const nextBBox = pathBBoxFromPathData(normalizedPathData) ?? baseBBox;
+    if (nextBBox) {
+      setDraftShapeOverride((prev) =>
+        createPathShapeOverride(normalizedPathData, nextBBox, prev?.sourceType ?? 'custom_path')
+      );
+    }
+  }, [baseBBox]);
+
+  const handleShapePathChange = useCallback(
+    (newPathData: string): { accepted: boolean } => {
+      const bounds = shapeEditBounds ?? baseBBox;
+      const prevPath = lastValidShapePathRef.current ?? renderedPath?.pathData ?? '';
+      // Guard: if somehow called before the baseline is seeded, accept silently.
+      if (!prevPath || prevPath === newPathData) {
+        lastValidShapePathRef.current = newPathData;
+        return { accepted: true };
       }
+      const validation = validatePathEdit(prevPath, newPathData, bounds ?? undefined);
+      setLastShapeValidation(validation);
+      if (!validation.ok) {
+        const now = Date.now();
+        if (now - lastShapeBlockToastAtRef.current > 700) {
+          notify({
+            variant: 'error',
+            title: 'Move blocked',
+            description: 'This move would create an invalid shape.',
+          });
+          lastShapeBlockToastAtRef.current = now;
+        }
+        return { accepted: false };
+      }
+      const nextBBox = pathBBoxFromPathData(newPathData) ?? baseBBox;
+      if (!nextBBox) return { accepted: false };
+      lastValidShapePathRef.current = newPathData;
+      setDraftShapeOverride((prev) =>
+        createPathShapeOverride(newPathData, nextBBox, prev?.sourceType ?? 'custom_path')
+      );
+      return { accepted: true };
     },
     [baseBBox, notify, renderedPath?.pathData, shapeEditBounds]
   );
@@ -1486,7 +1521,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const handleResetShape = useCallback(() => {
     if (!baseCharPath || !baseBBox) return;
     lastValidShapePathRef.current = baseCharPath.pathData;
-    setPendingValidationWarning(null);
     setLastShapeValidation(null);
     const resetOrigins = new Map<string, { x: number; y: number }>();
     buildEditableAnchorPoints(baseCharPath.pathData).forEach((point) => {
@@ -1518,44 +1552,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     const oldWarped = resolveShapePath(baseCharPath.pathData, persistedShape, baseBBox);
     const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox, oldWarped.pathData);
     const nextWarped = resolveShapePath(baseCharPath.pathData, nextShape, baseBBox);
-    const saveValidation = validatePathEdit(
-      lastValidShapePathRef.current || oldWarped.pathData,
-      nextWarped.pathData,
-      shapeEditBounds ?? baseBBox,
-      { strict: true }
-    );
-    setLastShapeValidation(saveValidation);
-    if (saveValidation.severity === 'error') {
-      notify({
-        variant: 'error',
-        title: 'Cannot save shape',
-        description: 'Shape geometry is invalid. Reset or adjust anchor points.',
-      });
-      if (import.meta.env.DEV) {
-        console.debug('[shape-save-blocked]', saveValidation);
-      }
-      return;
-    }
-    if (saveValidation.severity === 'warn') {
-      const proceed = await confirm({
-        title: 'Save with warning?',
-        description: 'Shape may have geometry issues. Save anyway?',
-        confirmText: 'Save anyway',
-        cancelText: 'Keep editing',
-      });
-      if (!proceed) return;
-      notify({
-        variant: 'info',
-        title: 'Saved with warning',
-        description: 'Review this shape carefully before production output.',
-      });
-      if (import.meta.env.DEV) {
-        console.debug('[shape-save-warning]', saveValidation);
-      }
-    }
-    if (!saveValidation.ok) {
-      return;
-    }
+    setLastShapeValidation(null);
     const oldBBox = oldWarped.bbox;
     const newBBox = nextWarped.bbox;
     const safeW = Math.max(1e-6, newBBox.width);
@@ -1579,7 +1576,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     setIsDirty(true);
     setEditorMode('module');
     setSelectedShapePointId(null);
-    setPendingValidationWarning(null);
     lastValidShapePathRef.current = nextWarped.pathData;
 
     try {
@@ -1606,7 +1602,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   }, [
     baseBBox,
     baseCharPath,
-    confirm,
     draftLeds,
     draftShapeOverride,
     editorCharId,
@@ -1804,6 +1799,18 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
               )}
               {!loading && localBounds && viewBox && (
                 USE_KONVA_MANUAL_EDITOR ? (
+                  editorMode === 'shape' ? (
+                    <div className="w-full h-full max-w-[85vw] max-h-[85vh]">
+                      <ShapePaperCanvas
+                        pathData={renderedPath?.pathData ?? ''}
+                        bounds={shapeEditBounds}
+                        selectedPointId={selectedShapePointId}
+                        onSelectPoint={setSelectedShapePointId}
+                        onPathChange={handleShapePathChange}
+                        onEditorReady={handleShapeEditorReady}
+                      />
+                    </div>
+                  ) : (
                   <div className="w-full h-full max-w-[85vw] max-h-[85vh]">
                     <ManualKonvaCanvas
                       editorMode={editorMode}
@@ -1826,14 +1833,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
                       setIsDirty={setIsDirty}
-                      shapePoints={editorMode === 'shape' ? editableShapePoints : []}
+                      shapePoints={[]}
                       selectedShapePointId={selectedShapePointId}
                       onSelectShapePoint={setSelectedShapePointId}
                       onUpdateShapePoint={handleUpdateShapePoint}
-                      showShapeDebug={editorMode === 'shape' && showShapeDebug}
+                      showShapeDebug={false}
                       anchorDebugCountById={anchorDebugCountById}
                     />
                   </div>
+                  )
                 ) : (
                   <svg
                     ref={svgRef}
@@ -2194,12 +2202,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                       <span className="text-[var(--text-3)]">Nodes</span>
                       <span className="text-[var(--text-1)]">{editableShapePoints.length}</span>
                     </div>
-                    {pendingValidationWarning && (
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-3)]">Validation</span>
-                        <span className="text-amber-300">Needs review</span>
-                      </div>
-                    )}
                     {showShapeDebug && (
                       <div className="flex justify-between">
                         <span className="text-[var(--text-3)]">Linked corners</span>
