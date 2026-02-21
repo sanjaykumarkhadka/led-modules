@@ -25,12 +25,12 @@ import {
   type CharacterShapeOverride,
 } from '../../core/math/shapeWarp';
 import {
-  buildEditableAnchorDebugGroups,
   buildEditableAnchorPoints,
   moveEditableAnchorPointSafe,
   type EditablePathPoint,
 } from '../../core/math/pathEditor';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
+import type { ShapeModulePreviewLed } from './paper/ShapePaperCanvas';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
@@ -38,6 +38,10 @@ const ROTATE_ARROW_PATH =
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
 const MAX_ZOOM_IN_FACTOR = 0.5;
+const MANUAL_EDITOR_FIT_PADDING = 0.05;
+const MANUAL_EDITOR_HEADER_HEIGHT = 64;
+const MANUAL_EDITOR_OUTER_PADDING = 16;
+const MANUAL_EDITOR_MIN_VIEWPORT_HEIGHT = 420;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 const createLedId = () => {
@@ -59,7 +63,10 @@ interface ShapeSessionFrame {
   pathOffset: { x: number; y: number };
 }
 
-const expandBox = (bbox: { x: number; y: number; width: number; height: number }, pad = 0.08) => {
+const expandBox = (
+  bbox: { x: number; y: number; width: number; height: number },
+  pad = MANUAL_EDITOR_FIT_PADDING
+) => {
   const paddingX = bbox.width * pad;
   const paddingY = bbox.height * pad;
   return {
@@ -67,6 +74,39 @@ const expandBox = (bbox: { x: number; y: number; width: number; height: number }
     y: bbox.y - paddingY,
     width: bbox.width + paddingX * 2,
     height: bbox.height + paddingY * 2,
+  };
+};
+
+const fitViewBoxToContainer = (
+  bbox: { x: number; y: number; width: number; height: number },
+  containerWidth: number,
+  containerHeight: number,
+  padding = MANUAL_EDITOR_FIT_PADDING
+) => {
+  const expanded = expandBox(bbox, padding);
+  if (containerWidth <= 1 || containerHeight <= 1) return expanded;
+
+  const containerAspect = containerWidth / containerHeight;
+  const boxAspect = expanded.width / Math.max(1e-6, expanded.height);
+
+  if (boxAspect > containerAspect) {
+    const targetHeight = expanded.width / containerAspect;
+    const dy = (targetHeight - expanded.height) / 2;
+    return {
+      x: expanded.x,
+      y: expanded.y - dy,
+      width: expanded.width,
+      height: targetHeight,
+    };
+  }
+
+  const targetWidth = expanded.height * containerAspect;
+  const dx = (targetWidth - expanded.width) / 2;
+  return {
+    x: expanded.x - dx,
+    y: expanded.y,
+    width: targetWidth,
+    height: expanded.height,
   };
 };
 
@@ -139,9 +179,10 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   const [groupSpacing, setGroupSpacing] = useState(1);
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
-  const [showShapeDebug, setShowShapeDebug] = useState(false);
+  const [showShapeModulePreview, setShowShapeModulePreview] = useState(true);
   const groupSpacingRef = useRef(1);
   const lastValidShapePathRef = useRef<string | null>(null);
+  const lastShapeMoveBlockedToastAtRef = useRef(0);
   const shapeAnchorOriginRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const shapeAnchorOriginCharIdRef = useRef<string | null>(null);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
@@ -152,6 +193,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
   const geometryAdapterRef = useRef<ReturnType<typeof createShapeGeometryAdapter> | null>(null);
   const dragRef = useRef<{
@@ -206,6 +248,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     endX: number;
     endY: number;
   } | null>(null);
+  const [availableHeightPx, setAvailableHeightPx] = useState(() =>
+    typeof window === 'undefined'
+      ? 760
+      : Math.max(
+          MANUAL_EDITOR_MIN_VIEWPORT_HEIGHT,
+          window.innerHeight - MANUAL_EDITOR_HEADER_HEIGHT - MANUAL_EDITOR_OUTER_PADDING
+        )
+  );
+  const [moduleHostSize, setModuleHostSize] = useState({ width: 0, height: 0 });
 
   const neededLanguages = useMemo(() => [...new Set(blocks.map((b) => b.language))], [blocks]);
   const { fonts, loading } = useFonts(neededLanguages);
@@ -300,18 +351,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     return buildEditableAnchorPoints(pathData);
   }, [draftShapeOverride?.outerPath, editorMode, renderedPath?.pathData]);
 
-  const anchorDebugCountById = useMemo(() => {
-    if (editorMode !== 'shape') return {};
-    const pathData = draftShapeOverride?.outerPath || renderedPath?.pathData || '';
-    if (!pathData) return {};
-    const groups = buildEditableAnchorDebugGroups(pathData);
-    const next: Record<string, number> = {};
-    groups.forEach((group) => {
-      next[group.representativeId] = group.memberIds.length;
-    });
-    return next;
-  }, [draftShapeOverride?.outerPath, editorMode, renderedPath?.pathData]);
-
   useEffect(() => {
     if (editorMode !== 'shape') {
       shapeAnchorOriginRef.current.clear();
@@ -369,6 +408,43 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   }, [editorMode, renderedPath?.pathData, editorCharId]);
 
   useEffect(() => {
+    const updateAvailableHeight = () => {
+      const next = Math.max(
+        MANUAL_EDITOR_MIN_VIEWPORT_HEIGHT,
+        window.innerHeight - MANUAL_EDITOR_HEADER_HEIGHT - MANUAL_EDITOR_OUTER_PADDING
+      );
+      setAvailableHeightPx(next);
+    };
+    updateAvailableHeight();
+    window.addEventListener('resize', updateAvailableHeight);
+    return () => window.removeEventListener('resize', updateAvailableHeight);
+  }, []);
+
+  useEffect(() => {
+    const target = canvasViewportRef.current ?? canvasContainerRef.current;
+    if (!target) return;
+
+    const updateHostSize = () => {
+      const rect = target.getBoundingClientRect();
+      const nextWidth = Math.max(0, Math.floor(rect.width));
+      const nextHeight = Math.max(0, Math.floor(rect.height));
+      setModuleHostSize((prev) =>
+        prev.width === nextWidth && prev.height === nextHeight
+          ? prev
+          : {
+              width: nextWidth,
+              height: nextHeight,
+            }
+      );
+    };
+
+    updateHostSize();
+    const ro = new ResizeObserver(updateHostSize);
+    ro.observe(target);
+    return () => ro.disconnect();
+  }, [availableHeightPx, editorMode, loading]);
+
+  useEffect(() => {
     seededViewportCharIdRef.current = null;
     setFixedLocalBounds(null);
     setBaseViewBox(null);
@@ -385,7 +461,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       return;
     }
     if (shapeSessionFrame) return;
-    const source = pathBounds || bbox;
+    const source = bbox;
     if (!source) return;
     setShapeSessionFrame({
       bounds: {
@@ -396,22 +472,28 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       },
       pathOffset: { x: source.x, y: source.y },
     });
-  }, [bbox, editorMode, pathBounds, shapeSessionFrame]);
+  }, [bbox, editorMode, shapeSessionFrame]);
 
   useEffect(() => {
-    const source = pathBounds || bbox;
+    if (editorMode !== 'module') return;
+    const source = bbox ?? pathBounds;
     if (!source || !editorCharId) return;
+    if (moduleHostSize.width <= 1 || moduleHostSize.height <= 1) return;
+
     const local = { x: 0, y: 0, width: source.width, height: source.height };
-    const base = expandBox(local);
-    if (seededViewportCharIdRef.current !== editorCharId || !fixedLocalBounds) {
-      seededViewportCharIdRef.current = editorCharId;
-      queueMicrotask(() => {
-        setFixedLocalBounds(local);
-        setBaseViewBox(base);
-        setViewBox(base);
-      });
-    }
-  }, [bbox, editorCharId, fixedLocalBounds, pathBounds]);
+    const base = fitViewBoxToContainer(
+      local,
+      moduleHostSize.width,
+      moduleHostSize.height,
+      MANUAL_EDITOR_FIT_PADDING
+    );
+    seededViewportCharIdRef.current = editorCharId;
+    queueMicrotask(() => {
+      setFixedLocalBounds(local);
+      setBaseViewBox(base);
+      setViewBox(base);
+    });
+  }, [bbox, editorCharId, editorMode, moduleHostSize.height, moduleHostSize.width, pathBounds]);
 
   const clampViewBoxToBase = useCallback(
     (next: ViewBox) => {
@@ -458,8 +540,10 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     return () => container.removeEventListener('wheel', handler);
   }, [viewBox, clampViewBoxToBase]);
 
+  const canonicalFrame = useMemo(() => bbox ?? pathBounds ?? null, [bbox, pathBounds]);
+
   const localBounds = useMemo(() => {
-    const source = fixedLocalBounds || pathBounds || bbox;
+    const source = fixedLocalBounds || canonicalFrame;
     if (!source) return null;
     return {
       x: 0,
@@ -467,10 +551,10 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       width: source.width,
       height: source.height,
     };
-  }, [bbox, fixedLocalBounds, pathBounds]);
+  }, [canonicalFrame, fixedLocalBounds]);
 
   const shapeEditBounds = useMemo(() => {
-    const source = shapeSessionFrame?.bounds ?? pathBounds ?? bbox ?? null;
+    const source = shapeSessionFrame?.bounds ?? canonicalFrame;
     if (!source) return null;
     return {
       x: source.x,
@@ -478,25 +562,19 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       width: source.width,
       height: source.height,
     };
-  }, [bbox, pathBounds, shapeSessionFrame?.bounds]);
+  }, [canonicalFrame, shapeSessionFrame?.bounds]);
 
   const pathTransform = useMemo(() => {
-    const source =
-      editorMode === 'shape'
-        ? shapeSessionFrame?.bounds ?? pathBounds ?? bbox
-        : pathBounds ?? bbox;
+    const source = canonicalFrame;
     if (!source) return undefined;
     return `translate(${-source.x} ${-source.y})`;
-  }, [bbox, editorMode, pathBounds, shapeSessionFrame?.bounds]);
+  }, [canonicalFrame]);
 
   const pathOffset = useMemo(() => {
-    const source =
-      editorMode === 'shape'
-        ? shapeSessionFrame?.pathOffset ?? pathBounds ?? bbox
-        : pathBounds ?? bbox;
+    const source = shapeSessionFrame?.pathOffset ?? canonicalFrame;
     if (!source) return { x: 0, y: 0 };
     return { x: source.x, y: source.y };
-  }, [bbox, editorMode, pathBounds, shapeSessionFrame?.pathOffset]);
+  }, [canonicalFrame, shapeSessionFrame?.pathOffset]);
 
   useEffect(() => {
     if (!geometryAdapterRef.current) {
@@ -541,6 +619,20 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       };
     });
   }, [charVisualScale, draftLeds, localBounds]);
+
+  const shapePreviewLeds = useMemo<ShapeModulePreviewLed[]>(
+    () =>
+      absoluteLeds.map((led) => ({
+        id: led.id,
+        x: led.x + pathOffset.x,
+        y: led.y + pathOffset.y,
+        w: led.w,
+        h: led.h,
+        rotation: led.rotation ?? 0,
+        invalid: invalidLedIds.has(led.id),
+      })),
+    [absoluteLeds, invalidLedIds, pathOffset.x, pathOffset.y]
+  );
 
   /** Render order: draw lower LEDs first so higher ones (smaller y) are on top and get clicks. */
   const absoluteLedsRenderOrder = useMemo(
@@ -1389,6 +1481,35 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     arrangeGrid();
   }, [arrangeGrid]);
 
+  /**
+   * Returns the effective LED scale matching the absoluteLeds computation.
+   * Handles both the modern `scale` field and legacy `width`/`height` fields.
+   */
+  const getLedEffectiveScale = useCallback((led: ManualLED): number => {
+    let s = led.scale ?? 1;
+    const leg = led as ManualLED & { width?: number; height?: number };
+    if (s === 1 && (leg.width != null || leg.height != null)) {
+      s = ((leg.width ?? BASE_LED_WIDTH) / BASE_LED_WIDTH + (leg.height ?? BASE_LED_HEIGHT) / BASE_LED_HEIGHT) / 2;
+    }
+    return s;
+  }, []);
+
+  /**
+   * Returns the capsule half-length used for containment testing.
+   * We test at (halfWidth - cornerRadius) which is the *centre* of each rounded end-cap
+   * rather than the outermost geometric tip. This avoids false positives when a module's
+   * rounded tip barely grazes the character outline at a curve.
+   */
+  const getLedCapsuleHalfLength = useCallback(
+    (led: ManualLED): number => {
+      const s = getLedEffectiveScale(led);
+      const halfW = (BASE_LED_WIDTH / 2) * s * charVisualScale; // = 6 * s * cVS
+      const cornerR = (BASE_LED_HEIGHT / 2) * s * charVisualScale; // = 2.5 * s * cVS
+      return Math.max(0, halfW - cornerR); // center of end-cap circle = 3.5 * s * cVS
+    },
+    [charVisualScale, getLedEffectiveScale]
+  );
+
   const getOutOfBoundsLedIds = useCallback(
     (leds: ManualLED[]) => {
       const failedIds = new Set<string>();
@@ -1399,14 +1520,58 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       for (const led of leds) {
         const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
         const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+        const worldX = x + pathOffset.x;
+        const worldY = y + pathOffset.y;
         const rotation = led.rotation ?? 0;
-        if (!isCapsuleInside(pathEl, x, y, rotation, 6 * charVisualScale)) {
+        if (!isCapsuleInside(pathEl, worldX, worldY, rotation, getLedCapsuleHalfLength(led))) {
           failedIds.add(led.id);
         }
       }
       return failedIds;
     },
-    [charVisualScale, localBounds]
+    [getLedCapsuleHalfLength, localBounds, pathOffset.x, pathOffset.y]
+  );
+
+  const notifyShapeMoveBlocked = useCallback(() => {
+    const now = Date.now();
+    if (now - lastShapeMoveBlockedToastAtRef.current < 800) return;
+    lastShapeMoveBlockedToastAtRef.current = now;
+    notify({
+      variant: 'error',
+      title: 'Move blocked',
+      description: 'This shape change would place one or more modules outside the character.',
+    });
+  }, [notify]);
+
+  const areAllModulesInsidePath = useCallback(
+    (candidatePathData: string): { ok: boolean; failedCount: number } => {
+      if (!localBounds || !candidatePathData || draftLeds.length === 0) {
+        return { ok: true, failedCount: 0 };
+      }
+      const adapter = geometryAdapterRef.current;
+      const pathEl = adapter?.getPathElement();
+      if (!adapter || !pathEl) return { ok: true, failedCount: 0 };
+
+      const originalPathData = pathEl.getAttribute('d') ?? '';
+      let failedCount = 0;
+      try {
+        adapter.setPath(candidatePathData);
+        for (const led of draftLeds) {
+          const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
+          const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+          const worldX = x + pathOffset.x;
+          const worldY = y + pathOffset.y;
+          const rotation = led.rotation ?? 0;
+          if (!isCapsuleInside(pathEl, worldX, worldY, rotation, getLedCapsuleHalfLength(led))) {
+            failedCount += 1;
+          }
+        }
+      } finally {
+        adapter.setPath(originalPathData);
+      }
+      return { ok: failedCount === 0, failedCount };
+    },
+    [draftLeds, getLedCapsuleHalfLength, localBounds, pathOffset.x, pathOffset.y]
   );
 
   useEffect(() => {
@@ -1423,13 +1588,18 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
         if (!sourcePath) return prev;
         const updated = moveEditableAnchorPointSafe(sourcePath, pointId, point);
         if (!updated.accepted) return prev;
+        const shapeInsideVerdict = areAllModulesInsidePath(updated.pathData);
+        if (!shapeInsideVerdict.ok) {
+          notifyShapeMoveBlocked();
+          return prev;
+        }
         const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
         if (!nextBBox) return prev;
         lastValidShapePathRef.current = updated.pathData;
         return createPathShapeOverride(updated.pathData, nextBBox, prev?.sourceType ?? 'custom_path');
       });
     },
-    [baseBBox, renderedPath?.pathData]
+    [areAllModulesInsidePath, baseBBox, notifyShapeMoveBlocked, renderedPath?.pathData]
   );
 
   /**
@@ -1453,6 +1623,11 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const handleShapePathChange = useCallback(
     (newPathData: string): { accepted: boolean } => {
+      const shapeInsideVerdict = areAllModulesInsidePath(newPathData);
+      if (!shapeInsideVerdict.ok) {
+        notifyShapeMoveBlocked();
+        return { accepted: false };
+      }
       const nextBBox = pathBBoxFromPathData(newPathData) ?? baseBBox ?? draftShapeOverride?.bbox;
       if (!nextBBox) return { accepted: true };
       lastValidShapePathRef.current = newPathData;
@@ -1461,7 +1636,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       );
       return { accepted: true };
     },
-    [baseBBox, draftShapeOverride?.bbox]
+    [areAllModulesInsidePath, baseBBox, draftShapeOverride?.bbox, notifyShapeMoveBlocked]
   );
 
   const handleResetShape = useCallback(() => {
@@ -1497,6 +1672,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     const oldWarped = resolveShapePath(baseCharPath.pathData, persistedShape, baseBBox);
     const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox, oldWarped.pathData);
     const nextWarped = resolveShapePath(baseCharPath.pathData, nextShape, baseBBox);
+    const shapeInsideVerdict = areAllModulesInsidePath(nextWarped.pathData);
+    if (!shapeInsideVerdict.ok) {
+      notify({
+        variant: 'error',
+        title: 'Cannot save shape',
+        description: `${shapeInsideVerdict.failedCount} module(s) would be outside the shape. Adjust the outline first.`,
+      });
+      return;
+    }
     const oldBBox = oldWarped.bbox;
     const newBBox = nextWarped.bbox;
     const safeW = Math.max(1e-6, newBBox.width);
@@ -1551,6 +1735,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     editorCharId,
     getCharShapeOverride,
     notify,
+    areAllModulesInsidePath,
     onSwitchMode,
     projectId,
     setCharManualLeds,
@@ -1632,8 +1817,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="relative min-h-screen isolate bg-[var(--surface-app)] p-0 text-[var(--text-1)]">
-      <div className="relative z-10 flex h-full min-h-0">
+    <div className="relative isolate bg-[var(--surface-app)] p-0 text-[var(--text-1)] h-screen flex flex-col overflow-hidden">
+      <div className="relative z-10 flex flex-1 min-h-0">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="h-16 shrink-0 border-b border-[var(--border-1)] bg-[var(--surface-canvas)] flex items-center justify-between px-6">
             <div className="flex items-center gap-4">
@@ -1674,25 +1859,35 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                   Shape Mode
                 </button>
               </div>
-              {editorMode === 'shape' && (
+              {editorMode === 'shape' ? (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setShowShapeDebug((prev) => !prev)}
-                    className={`px-3 py-2 rounded-lg border text-sm ${
-                      showShapeDebug
-                        ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-200'
-                        : 'border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]'
-                    }`}
-                  >
-                    {showShapeDebug ? 'Debug: On' : 'Debug: Off'}
-                  </button>
                   <button
                     type="button"
                     onClick={handleResetShape}
                     className="px-3 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)] text-sm"
                   >
                     Reset shape
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowShapeModulePreview((prev) => !prev)}
+                    aria-label={showShapeModulePreview ? 'Hide module preview' : 'Show module preview'}
+                    title={showShapeModulePreview ? 'Hide module preview' : 'Show module preview'}
+                    className="p-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)] hover:text-[var(--text-1)] transition-colors"
+                  >
+                    {showShapeModulePreview ? (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    ) : (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a21.77 21.77 0 0 1 5.17-5.94" />
+                        <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.8 21.8 0 0 1-3.11 4.19" />
+                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -1703,29 +1898,38 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                   >
                     Save Shape
                   </button>
+                  <button
+                    onClick={handleCancel}
+                    className="px-4 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]"
+                  >
+                    Back
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      void handleSave();
+                    }}
+                    disabled={projectsSaving}
+                    className="px-4 py-2 rounded-lg bg-[var(--accent-500)] text-white font-semibold hover:bg-[var(--accent-600)]"
+                  >
+                    {projectsSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                  <button
+                    onClick={handleCancel}
+                    className="px-4 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]"
+                  >
+                    Back
+                  </button>
                 </>
               )}
-              <button
-                onClick={handleCancel}
-                className="px-4 py-2 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-2)]"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => {
-                  void handleSave();
-                }}
-                disabled={projectsSaving || editorMode === 'shape'}
-                className="px-4 py-2 rounded-lg bg-[var(--accent-500)] text-white font-semibold hover:bg-[var(--accent-600)]"
-              >
-                {projectsSaving ? 'Saving...' : 'Save Changes'}
-              </button>
             </div>
           </div>
-          <div className="flex-1 grid grid-cols-[1fr_320px] min-h-0">
+          <div className="grid flex-1 min-h-0 grid-cols-[1fr_320px]">
             <div
               ref={canvasContainerRef}
-              className={`relative flex items-center justify-center min-h-0 min-w-0 ${
+              className={`relative flex min-h-0 min-w-0 ${
                 tool === 'pan' && isPanning
                   ? 'cursor-grabbing'
                   : tool === 'pan'
@@ -1745,18 +1949,21 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
               {!loading && localBounds && viewBox && (
                 USE_KONVA_MANUAL_EDITOR ? (
                   editorMode === 'shape' ? (
-                    <div className="w-full h-full max-w-[85vw] max-h-[85vh]">
+                    <div ref={canvasViewportRef} className="w-full h-full">
                       <ShapePaperCanvas
                         pathData={renderedPath?.pathData ?? ''}
                         bounds={shapeEditBounds}
                         selectedPointId={selectedShapePointId}
                         onSelectPoint={setSelectedShapePointId}
                         onPathChange={handleShapePathChange}
+                        showModulePreview={showShapeModulePreview}
+                        modulePreviewLeds={shapePreviewLeds}
+                        fitPaddingFactor={MANUAL_EDITOR_FIT_PADDING}
                         onEditorReady={handleShapeEditorReady}
                       />
                     </div>
                   ) : (
-                  <div className="w-full h-full max-w-[85vw] max-h-[85vh]">
+                  <div ref={canvasViewportRef} className="w-full h-full">
                     <ManualKonvaCanvas
                       editorMode={editorMode}
                       tool={tool}
@@ -1783,14 +1990,14 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                       onSelectShapePoint={setSelectedShapePointId}
                       onUpdateShapePoint={handleUpdateShapePoint}
                       showShapeDebug={false}
-                      anchorDebugCountById={anchorDebugCountById}
+                      anchorDebugCountById={{}}
                     />
                   </div>
                   )
                 ) : (
                   <svg
                     ref={svgRef}
-                    className="w-full h-full max-w-[85vw] max-h-[85vh]"
+                    className="w-full h-full"
                     viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
                     preserveAspectRatio="xMidYMid meet"
                     style={{ touchAction: 'none' }}
@@ -2112,7 +2319,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
               )}
             </div>
 
-            <div className="bg-[var(--surface-panel)] border-l border-[var(--border-1)] p-5 space-y-5 overflow-y-auto">
+            <div className="min-h-0 bg-[var(--surface-panel)] border-l border-[var(--border-1)] overflow-y-auto">
+              <div className="p-5 space-y-5">
               {editorMode === 'module' ? (
                 <div className="space-y-2">
                   <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Module Specs</div>
@@ -2147,14 +2355,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                       <span className="text-[var(--text-3)]">Nodes</span>
                       <span className="text-[var(--text-1)]">{editableShapePoints.length}</span>
                     </div>
-                    {showShapeDebug && (
-                      <div className="flex justify-between">
-                        <span className="text-[var(--text-3)]">Linked corners</span>
-                        <span className="text-[var(--text-1)]">
-                          {Object.values(anchorDebugCountById).filter((count) => count > 1).length}
-                        </span>
-                      </div>
-                    )}
                     {selectedShapePointId != null && editableShapePoints.find((p) => p.id === selectedShapePointId) && (
                       <div className="pt-2 border-t border-[var(--border-1)]">
                         <div className="text-[var(--text-3)] text-xs mb-1">Selected node</div>
@@ -2298,6 +2498,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                   </button>
                 </div>
               </div>}
+              </div>
             </div>
           </div>
         </div>
@@ -2305,7 +2506,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
       {/* Tetra-like left tool rail */}
       {editorMode === 'module' && <div
-        className="absolute left-4 top-1/2 z-20 -translate-y-1/2 flex flex-col items-center gap-1 rounded-2xl border border-[var(--border-1)] bg-[var(--surface-elevated)] px-2 py-2 shadow-[var(--shadow-md)]"
+        className="absolute left-4 top-[5.5rem] z-20 flex flex-col items-center gap-1 rounded-2xl border border-[var(--border-1)] bg-[var(--surface-elevated)] px-2 py-2 shadow-[var(--shadow-md)]"
         role="toolbar"
       >
         <div className="flex flex-col items-center gap-0.5">

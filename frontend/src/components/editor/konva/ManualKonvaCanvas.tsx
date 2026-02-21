@@ -330,8 +330,53 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
     [isDark]
   );
 
+  // Build the grid lines every time the viewBox or theme changes, matching
+  // the Paper.js grid used in the shape editor exactly.
+  const gridLines = useMemo(() => {
+    const step = 10;
+    // Extend well past the viewBox so the grid covers panned positions.
+    const padX = Math.max(300, viewBox.width);
+    const padY = Math.max(300, viewBox.height);
+    const x0 = Math.floor((viewBox.x - padX) / step) * step;
+    const y0 = Math.floor((viewBox.y - padY) / step) * step;
+    const x1 = viewBox.x + viewBox.width + padX;
+    const y1 = viewBox.y + viewBox.height + padY;
+    const gridMinor = isDark ? 'rgba(148,163,184,0.16)' : 'rgba(148,163,184,0.12)';
+    const gridMajor = isDark ? 'rgba(148,163,184,0.28)' : 'rgba(148,163,184,0.22)';
+    const lines: React.ReactElement[] = [];
+    for (let x = x0; x <= x1; x += step) {
+      const major = Math.round(x) % 50 === 0;
+      lines.push(
+        <Line
+          key={`v${x}`}
+          points={[x, y0, x, y1]}
+          stroke={major ? gridMajor : gridMinor}
+          strokeWidth={major ? 0.7 : 0.45}
+          listening={false}
+        />
+      );
+    }
+    for (let y = y0; y <= y1; y += step) {
+      const major = Math.round(y) % 50 === 0;
+      lines.push(
+        <Line
+          key={`h${y}`}
+          points={[x0, y, x1, y]}
+          stroke={major ? gridMajor : gridMinor}
+          strokeWidth={major ? 0.7 : 0.45}
+          listening={false}
+        />
+      );
+    }
+    return lines;
+  }, [viewBox, isDark]);
+
   return (
-    <div ref={containerRef} className={`relative min-h-0 min-w-0 ${stageClassName}`}>
+    <div
+      ref={containerRef}
+      className={`relative w-full h-full min-h-0 min-w-0 ${stageClassName}`}
+      style={{ background: colors.stageBackground }}
+    >
       <Stage
         ref={(node) => {
           stageRef.current = node;
@@ -557,31 +602,18 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
         }}
       >
         <Layer x={stageOffset.x} y={stageOffset.y} scaleX={scale} scaleY={scale}>
+          {/* Full-canvas background fill so colour is consistent regardless of CSS */}
           <Rect
-            x={viewBox.x}
-            y={viewBox.y}
-            width={viewBox.width}
-            height={viewBox.height}
-            fill="transparent"
+            x={viewBox.x - 5000}
+            y={viewBox.y - 5000}
+            width={viewBox.width + 10000}
+            height={viewBox.height + 10000}
+            fill={colors.stageBackground}
+            listening={false}
           />
 
           <Group listening={false}>
-            {Array.from({ length: 120 }).map((_, i) => (
-              <Line
-                key={`grid-h-${i}`}
-                points={[viewBox.x - 1200, i * 10 - 1200, viewBox.x + viewBox.width + 1200, i * 10 - 1200]}
-                stroke={i % 5 === 0 ? colors.gridMajor : colors.gridMinor}
-                strokeWidth={i % 5 === 0 ? 0.7 : 0.45}
-              />
-            ))}
-            {Array.from({ length: 160 }).map((_, i) => (
-              <Line
-                key={`grid-v-${i}`}
-                points={[i * 10 - 1200, viewBox.y - 1200, i * 10 - 1200, viewBox.y + viewBox.height + 1200]}
-                stroke={i % 5 === 0 ? colors.gridMajor : colors.gridMinor}
-                strokeWidth={i % 5 === 0 ? 0.7 : 0.45}
-              />
-            ))}
+            {gridLines}
           </Group>
 
           <Path

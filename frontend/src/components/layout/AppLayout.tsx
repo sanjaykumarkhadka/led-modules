@@ -108,7 +108,7 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
       <main
         className={`mx-auto grid w-full ${
           isManualEditorRoute
-            ? 'max-w-none gap-0 px-0 py-0 min-h-screen'
+            ? 'max-w-none gap-0 px-0 py-0 h-screen overflow-hidden'
             : isProjectDetailsRoute
               ? 'max-w-none h-[calc(100vh-64px)] min-h-[calc(100vh-64px)] gap-0 px-0 py-0 overflow-hidden'
               : isProjectsListRoute
@@ -141,8 +141,10 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
 
         <section
           className={
-            isDesignerRoute || isProjectsListRoute
+            isManualEditorRoute
               ? 'h-full min-h-0 rounded-none border-0 bg-transparent p-0 shadow-none overflow-hidden'
+              : isDesignerRoute || isProjectsListRoute
+                ? 'h-full min-h-0 rounded-none border-0 bg-transparent p-0 shadow-none overflow-hidden'
               : 'h-full rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-canvas)] p-4 shadow-[var(--shadow-sm)] md:p-6'
           }
         >

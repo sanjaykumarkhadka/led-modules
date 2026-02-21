@@ -6,19 +6,32 @@ import {
   buildEditablePathPoints,
 } from '../../../core/math/pathEditor';
 
+export interface ShapeModulePreviewLed {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  invalid?: boolean;
+}
+
 export interface ShapePaperCanvasProps {
   pathData: string;
   bounds: { x: number; y: number; width: number; height: number } | null;
   selectedPointId: string | null;
   onSelectPoint: (id: string | null) => void;
   onPathChange: (newPathData: string) => { accepted: boolean };
+  showModulePreview?: boolean;
+  modulePreviewLeds?: ShapeModulePreviewLed[];
+  fitPaddingFactor?: number;
   /** Called once after the editor has parsed the initial path, with the
    *  Paper.js-normalised version of the SVG string.  Use it to seed the
    *  validation baseline so the first drag doesn't produce a spurious warning. */
   onEditorReady?: (normalizedPathData: string) => void;
 }
 
-const FIT_PADDING_FACTOR = 0.12;
+const FIT_PADDING_FACTOR = 0.05;
 
 const HANDLE_RADIUS = 2.8;
 const HANDLE_RADIUS_SELECTED = 3.6;
@@ -61,6 +74,9 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
   selectedPointId,
   onSelectPoint,
   onPathChange,
+  showModulePreview = false,
+  modulePreviewLeds = [],
+  fitPaddingFactor,
   onEditorReady,
 }) => {
   const { theme } = useTheme();
@@ -71,6 +87,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
   const glyphPathRef = useRef<paper.CompoundPath | null>(null);
   const editPathRef = useRef<paper.CompoundPath | null>(null);
   const anchorsLayerRef = useRef<paper.Layer | null>(null);
+  const previewLayerRef = useRef<paper.Layer | null>(null);
   const gridLayerRef = useRef<paper.Layer | null>(null);
   const anchorRecordsRef = useRef<AnchorRecord[]>([]);
 
@@ -128,8 +145,9 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
 
   const fitView = useCallback(
     (scope: paper.PaperScope, b: { x: number; y: number; width: number; height: number }) => {
-      const padX = b.width * FIT_PADDING_FACTOR;
-      const padY = b.height * FIT_PADDING_FACTOR;
+      const fitPadding = fitPaddingFactor ?? FIT_PADDING_FACTOR;
+      const padX = b.width * fitPadding;
+      const padY = b.height * fitPadding;
       const paddedW = b.width + padX * 2;
       const paddedH = b.height + padY * 2;
       const el = scope.view.element as HTMLCanvasElement;
@@ -139,7 +157,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       minZoomRef.current = scope.view.zoom;
       scope.view.center = new scope.Point(b.x + b.width / 2, b.y + b.height / 2);
     },
-    [],
+    [fitPaddingFactor],
   );
 
   // ─── Visual helpers ────────────────────────────────────────────────────────────
@@ -205,6 +223,51 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
     [isDark],
   );
 
+  const renderModulePreview = useCallback(
+    (scope: paper.PaperScope) => {
+      const previewLayer = previewLayerRef.current;
+      if (!previewLayer) return;
+      previewLayer.activate();
+      previewLayer.removeChildren();
+      if (!showModulePreview || modulePreviewLeds.length === 0) return;
+
+      const stroke = isDark ? 'rgba(56,189,248,0.42)' : 'rgba(2,132,199,0.45)';
+      const fill = isDark ? 'rgba(56,189,248,0.12)' : 'rgba(2,132,199,0.12)';
+      const invalidStroke = 'rgba(220,38,38,0.65)';
+      const invalidFill = 'rgba(220,38,38,0.18)';
+      const dot = isDark ? 'rgba(148,163,184,0.5)' : 'rgba(100,116,139,0.55)';
+
+      modulePreviewLeds.forEach((led) => {
+        const halfW = led.w / 2;
+        const halfH = led.h / 2;
+        const rect = new scope.Rectangle(
+          new scope.Point(led.x - halfW, led.y - halfH),
+          new scope.Size(Math.max(0.1, led.w), Math.max(0.1, led.h))
+        );
+        const capsule = new scope.Path.Rectangle(rect, new scope.Size(Math.max(0.1, halfH), Math.max(0.1, halfH)));
+        capsule.fillColor = new scope.Color(led.invalid ? invalidFill : fill);
+        capsule.strokeColor = new scope.Color(led.invalid ? invalidStroke : stroke);
+        capsule.strokeWidth = 0.9 / scope.view.zoom;
+        if (led.rotation) {
+          capsule.rotate(led.rotation, new scope.Point(led.x, led.y));
+        }
+        capsule.locked = true;
+
+        const dotL = new scope.Path.Circle(new scope.Point(led.x - led.w * 0.29, led.y), Math.max(0.35, led.h * 0.14));
+        const dotR = new scope.Path.Circle(new scope.Point(led.x + led.w * 0.29, led.y), Math.max(0.35, led.h * 0.14));
+        dotL.fillColor = new scope.Color(dot);
+        dotR.fillColor = new scope.Color(dot);
+        if (led.rotation) {
+          dotL.rotate(led.rotation, new scope.Point(led.x, led.y));
+          dotR.rotate(led.rotation, new scope.Point(led.x, led.y));
+        }
+        dotL.locked = true;
+        dotR.locked = true;
+      });
+    },
+    [isDark, modulePreviewLeds, showModulePreview],
+  );
+
   // ─── Sync scene to pathData ────────────────────────────────────────────────────
 
   const syncScene = useCallback(
@@ -216,6 +279,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       // ── Remove old items ──
       if (glyphPathRef.current) { glyphPathRef.current.remove(); glyphPathRef.current = null; }
       if (editPathRef.current) { editPathRef.current.remove(); editPathRef.current = null; }
+      previewLayerRef.current?.removeChildren();
       anchorsLayerRef.current?.removeChildren();
       anchorRecordsRef.current = [];
       activeDragRef.current = null;
@@ -238,6 +302,8 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       glyph.strokeWidth = 2 / scope.view.zoom;
       glyph.fillRule = 'evenodd';
       glyphPathRef.current = glyph;
+
+      renderModulePreview(scope);
 
       // ── Edit path (invisible, drives drag) ──
       const editCp = new scope.CompoundPath(data);
@@ -311,7 +377,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       }
       scope.view.update();
     },
-    [drawGrid, fitView, isDark, refreshAnchorVisuals],
+    [drawGrid, fitView, isDark, refreshAnchorVisuals, renderModulePreview],
   );
 
   // ─── Mount: setup Paper.js scope, Tool, ResizeObserver ───────────────────────
@@ -327,10 +393,14 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
     // Layer 0 = background (grid + glyph)
     const bgLayer = scope.project.activeLayer;
     bgLayer.name = 'background';
-    // Layer 1 = anchors (always on top)
+    // Layer 1 = module preview (between glyph and anchors)
+    const previewLayer = new scope.Layer();
+    previewLayer.name = 'module-preview';
+    // Layer 2 = anchors (always on top)
     const anchorLayer = new scope.Layer();
     anchorLayer.name = 'anchors';
     gridLayerRef.current = bgLayer;
+    previewLayerRef.current = previewLayer;
     anchorsLayerRef.current = anchorLayer;
 
     // ── Tool: all mouse interactions go through here. ───────────────────────
@@ -513,6 +583,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       glyphPathRef.current = null;
       editPathRef.current = null;
       anchorsLayerRef.current = null;
+      previewLayerRef.current = null;
       gridLayerRef.current = null;
       anchorRecordsRef.current = [];
       activeDragRef.current = null;
@@ -554,10 +625,17 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
     scopeRef.current?.view.update();
   }, [selectedPointId, refreshAnchorVisuals]);
 
+  useEffect(() => {
+    const scope = scopeRef.current;
+    if (!scope) return;
+    renderModulePreview(scope);
+    scope.view.update();
+  }, [renderModulePreview, showModulePreview, modulePreviewLeds]);
+
   return (
     <canvas
       ref={canvasRef}
-      className="w-full h-full max-w-[85vw] max-h-[85vh] block"
+      className="w-full h-full block"
       style={{
         background: isDark ? '#111827' : '#f8fafc',
         touchAction: 'none',
