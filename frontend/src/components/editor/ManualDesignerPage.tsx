@@ -31,6 +31,7 @@ import {
 } from '../../core/math/pathEditor';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
 import type { ShapeModulePreviewLed } from './paper/ShapePaperCanvas';
+import { generateLEDPositions, estimateGridCount, createDefaultAutofillConfig } from '../../core/math/placement';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
 const ROTATE_ARROW_PATH =
@@ -180,6 +181,13 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const [showShapeModulePreview, setShowShapeModulePreview] = useState(true);
+
+  // Autofill configuration state
+  const [autofillOrientation, setAutofillOrientation] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [autofillModuleScale, setAutofillModuleScale] = useState(1.0);
+  const [autofillSpacing, setAutofillSpacing] = useState(2);
+  const [autofillInset, setAutofillInset] = useState(1);
+  const [autofillRunning, setAutofillRunning] = useState(false);
   const groupSpacingRef = useRef(1);
   const lastValidShapePathRef = useRef<string | null>(null);
   const lastShapeMoveBlockedToastAtRef = useRef(0);
@@ -1223,6 +1231,90 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     clearSelection();
     setIsDirty(true);
   }, [clearSelection]);
+
+  const buildAutofillConfig = useCallback(() => {
+    const cfg = createDefaultAutofillConfig();
+    cfg.scale = autofillModuleScale;
+    cfg.spacing = autofillSpacing;
+    cfg.orientation = autofillOrientation;
+    cfg.inset = autofillInset;
+    return cfg;
+  }, [autofillInset, autofillModuleScale, autofillOrientation, autofillSpacing]);
+
+  const handleAutofill = useCallback(async () => {
+    const pathEl =
+      pathRef.current ?? geometryAdapterRef.current?.getPathElement() ?? null;
+    if (!pathEl || !localBounds) {
+      notify({ variant: 'error', title: 'Autofill failed', description: 'Character path not ready.' });
+      return;
+    }
+
+    if (draftLeds.length > 0) {
+      const ok = await confirm({
+        title: 'Replace all modules?',
+        description: 'Autofill will remove all existing modules and fill the character automatically.',
+        confirmText: 'Autofill',
+        variant: 'danger',
+      });
+      if (!ok) return;
+    }
+
+    setAutofillRunning(true);
+    try {
+      const positions = generateLEDPositions(pathEl, buildAutofillConfig());
+
+      if (positions.length === 0) {
+        notify({ variant: 'error', title: 'Autofill produced no modules', description: 'Try reducing spacing or inset.' });
+        return;
+      }
+
+      const newLeds: ManualLED[] = positions.map((pos) => {
+        const localX = pos.x - pathOffset.x;
+        const localY = pos.y - pathOffset.y;
+        const u = localBounds.width > 0 ? (localX - localBounds.x) / localBounds.width : 0;
+        const v = localBounds.height > 0 ? (localY - localBounds.y) / localBounds.height : 0;
+        return {
+          id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+          u,
+          v,
+          x: localX,
+          y: localY,
+          rotation: pos.rotation,
+          scale: autofillModuleScale !== 1 ? autofillModuleScale : undefined,
+        };
+      });
+
+      setDraftLeds(newLeds);
+      clearSelection();
+      setIsDirty(true);
+      notify({ variant: 'success', title: `Autofill complete — ${newLeds.length} modules placed` });
+    } finally {
+      setAutofillRunning(false);
+    }
+  }, [
+    autofillModuleScale,
+    buildAutofillConfig,
+    clearSelection,
+    confirm,
+    draftLeds.length,
+    localBounds,
+    notify,
+    pathOffset.x,
+    pathOffset.y,
+  ]);
+
+  /** Estimated LED count preview for the autofill panel */
+  const autofillEstimatedCount = useMemo(() => {
+    const pathEl =
+      pathRef.current ?? geometryAdapterRef.current?.getPathElement() ?? null;
+    if (!pathEl || !localBounds) return null;
+    try {
+      return estimateGridCount(pathEl, buildAutofillConfig());
+    } catch {
+      return null;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildAutofillConfig, localBounds, draftLeds.length]);
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedLedIds.size === 0) return;
@@ -2383,6 +2475,105 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                         })()}
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Autofill Panel ── */}
+              {editorMode === 'module' && (
+                <div className="space-y-2">
+                  <div className="text-xs text-[var(--text-3)] uppercase tracking-wide">Autofill</div>
+                  <div className="rounded-xl border border-[var(--border-1)] bg-[var(--surface-elevated)] p-4 space-y-4 text-sm">
+
+                    {/* Orientation */}
+                    <div className="space-y-1.5">
+                      <span className="text-[var(--text-2)]">Orientation</span>
+                      <div className="grid grid-cols-2 gap-1 mt-1">
+                        {(['horizontal', 'vertical'] as const).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => setAutofillOrientation(opt)}
+                            className={`py-1.5 rounded-lg text-xs font-medium transition-colors capitalize ${
+                              autofillOrientation === opt
+                                ? 'bg-[var(--accent-500)] text-white'
+                                : 'bg-[var(--surface-strong)] text-[var(--text-2)] hover:text-[var(--text-1)]'
+                            }`}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Module Scale */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[var(--text-2)]">Module size</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">{autofillModuleScale.toFixed(2)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={2.0}
+                        step={0.05}
+                        value={autofillModuleScale}
+                        onChange={(e) => setAutofillModuleScale(parseFloat(e.currentTarget.value))}
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
+                      />
+                    </div>
+
+                    {/* Spacing */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[var(--text-2)]">Spacing</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">{autofillSpacing.toFixed(1)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={10}
+                        step={0.5}
+                        value={autofillSpacing}
+                        onChange={(e) => setAutofillSpacing(parseFloat(e.currentTarget.value))}
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
+                      />
+                    </div>
+
+                    {/* Edge inset */}
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[var(--text-2)]">Edge inset</span>
+                        <span className="text-[var(--text-1)] font-mono text-xs">{autofillInset.toFixed(1)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={5}
+                        step={0.5}
+                        value={autofillInset}
+                        onChange={(e) => setAutofillInset(parseFloat(e.currentTarget.value))}
+                        className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-[var(--surface-strong)] accent-[var(--accent-500)]"
+                      />
+                    </div>
+
+                    {/* Estimated count preview */}
+                    {autofillEstimatedCount != null && (
+                      <div className="flex justify-between items-center text-xs text-[var(--text-3)] border-t border-[var(--border-1)] pt-3">
+                        <span>Estimated modules</span>
+                        <span className="font-mono text-[var(--text-2)]">~{autofillEstimatedCount}</span>
+                      </div>
+                    )}
+
+                    {/* Autofill button */}
+                    <button
+                      type="button"
+                      disabled={autofillRunning}
+                      onClick={handleAutofill}
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--accent-500)] hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold transition-all"
+                    >
+                      {autofillRunning ? 'Filling…' : 'Autofill'}
+                    </button>
                   </div>
                 </div>
               )}
