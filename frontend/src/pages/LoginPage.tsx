@@ -63,7 +63,7 @@ function EyeOffIcon() {
 function FeatureIcon({ kind }: { kind: 'grid' | 'settings' | 'file' }) {
   if (kind === 'grid') {
     return (
-      <svg viewBox="0 0 24 24" className="h-5 w-5 text-blue-400" fill="none" aria-hidden>
+      <svg viewBox="0 0 24 24" className="h-5 w-5 text-zinc-300" fill="none" aria-hidden>
         <path
           d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 7v-7h7v7h-7Z"
           stroke="currentColor"
@@ -75,7 +75,7 @@ function FeatureIcon({ kind }: { kind: 'grid' | 'settings' | 'file' }) {
   }
   if (kind === 'settings') {
     return (
-      <svg viewBox="0 0 24 24" className="h-5 w-5 text-blue-400" fill="none" aria-hidden>
+      <svg viewBox="0 0 24 24" className="h-5 w-5 text-zinc-300" fill="none" aria-hidden>
         <path
           d="m12 3 1.5 2.7 3 .4.7 3 2.6 1.5-1 2.8 1 2.8-2.6 1.5-.7 3-3 .4L12 21l-1.5-2.7-3-.4-.7-3-2.6-1.5 1-2.8-1-2.8 2.6-1.5.7-3 3-.4L12 3Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"
           stroke="currentColor"
@@ -86,7 +86,7 @@ function FeatureIcon({ kind }: { kind: 'grid' | 'settings' | 'file' }) {
     );
   }
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5 text-blue-400" fill="none" aria-hidden>
+    <svg viewBox="0 0 24 24" className="h-5 w-5 text-zinc-300" fill="none" aria-hidden>
       <path
         d="M7 3h7l5 5v13H7V3Zm7 1v5h5M9 12h8M9 16h8"
         stroke="currentColor"
@@ -132,18 +132,18 @@ export function LoginPage({
   return (
     <div className="flex min-h-screen w-full overflow-hidden bg-[#09090b] text-zinc-50">
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden border-r border-zinc-800 bg-zinc-900 p-12 lg:flex">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(29,78,216,0.28),_transparent_46%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(161,161,170,0.2),_transparent_46%)]" />
 
         <div className="relative z-10">
           <div className="mb-8 flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-blue-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-zinc-700">
               <BrandIcon />
             </div>
             <span className="text-xl font-bold tracking-tight">LED Modules</span>
           </div>
 
           <h1 className="mb-6 text-4xl font-bold leading-tight tracking-tight md:text-5xl">
-            Professional LED signage planning, <span className="text-blue-500">reimagined</span>.
+            Professional LED signage planning, <span className="text-zinc-200">reimagined</span>.
           </h1>
 
           <p className="max-w-md text-lg text-zinc-400">
@@ -174,7 +174,7 @@ export function LoginPage({
       </div>
 
       <div className="relative flex w-full items-center justify-center p-8 lg:w-1/2">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(30,58,138,0.24),_transparent_55%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(113,113,122,0.2),_transparent_55%)]" />
 
         <div className="relative z-10 w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900/50 shadow-xl backdrop-blur-sm">
           <div className="space-y-1 p-6">
@@ -199,7 +199,7 @@ export function LoginPage({
                   placeholder="m@example.com"
                   value={localEmail}
                   onChange={(e) => setLocalEmail(e.target.value)}
-                  className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+                  className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-zinc-500 focus:outline-none"
                   required
                 />
               </div>
@@ -213,7 +213,7 @@ export function LoginPage({
                     type={showPassword ? 'text' : 'password'}
                     value={localPassword}
                     onChange={(e) => setLocalPassword(e.target.value)}
-                    className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+                    className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/50 px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-zinc-500 focus:outline-none"
                     required
                   />
                   <button
@@ -228,7 +228,7 @@ export function LoginPage({
               </div>
               <button
                 type="submit"
-                className="inline-flex h-10 w-full items-center justify-center rounded-md bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
+                className="inline-flex h-10 w-full items-center justify-center rounded-md bg-zinc-700 px-4 text-sm font-medium text-white transition-colors hover:bg-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2 focus:ring-offset-zinc-950"
               >
                 Sign in <ArrowRightIcon />
               </button>

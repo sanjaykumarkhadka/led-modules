@@ -14,7 +14,7 @@ function PlusIcon() {
   );
 }
 
-function SearchIcon({ className = 'h-4 w-4 text-zinc-500' }: { className?: string }) {
+function SearchIcon({ className = 'h-4 w-4 text-[var(--text-4)]' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden>
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
@@ -154,11 +154,11 @@ function ProjectCard({
 
   if (viewMode === 'grid') {
     return (
-      <div className="group h-full overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10">
+      <div className="group h-full overflow-hidden rounded-lg border border-[var(--border-1)] bg-[var(--surface-elevated)] transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10">
         <button type="button" onClick={onOpen} className="block w-full text-left">
           <div className={`relative flex h-40 w-full items-center justify-center ${thumbnailClass(project)}`}>
-            <div className="absolute inset-0 bg-gradient-to-t from-[#09090b] to-transparent opacity-60" />
-            <span className="text-4xl font-bold uppercase tracking-widest text-zinc-100/20">
+            <div className="absolute inset-0 bg-gradient-to-t from-[var(--surface-app)] to-transparent opacity-60" />
+            <span className="text-4xl font-bold uppercase tracking-widest text-[var(--text-1)]/20">
               {(project.name || 'Untitled').substring(0, 3)}
             </span>
             <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
@@ -172,7 +172,7 @@ function ProjectCard({
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${
                     project.isFavorite
                       ? 'bg-amber-400/20 text-amber-300 hover:bg-amber-400/30'
-                      : 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+                      : 'bg-[var(--surface-subtle)] text-[var(--text-2)] hover:bg-[var(--surface-strong)]'
                   }`}
                   aria-label={project.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
                 >
@@ -184,7 +184,7 @@ function ProjectCard({
                     e.stopPropagation();
                     onEdit();
                   }}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-subtle)] text-[var(--text-2)] hover:bg-[var(--surface-strong)]"
                   aria-label="Project actions"
                 >
                   <MoreVerticalIcon />
@@ -196,18 +196,18 @@ function ProjectCard({
 
         <div className="pb-2 pl-6 pr-6 pt-4">
           <button type="button" onClick={onOpen} className="block w-full text-left">
-            <h3 className="truncate text-lg font-semibold text-zinc-100">{project.name || 'Untitled project'}</h3>
+            <h3 className="truncate text-lg font-semibold text-[var(--text-1)]">{project.name || 'Untitled project'}</h3>
           </button>
         </div>
 
         <div className="pl-6 pr-6 pb-4">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <div className="flex items-center gap-2 text-xs text-[var(--text-3)]">
             <span className={`inline-block h-2 w-2 rounded-full ${statusColor(status)}`} />
             {status}
           </div>
         </div>
 
-        <div className="flex items-center justify-between pb-4 pl-6 pr-6 pt-0 text-xs text-zinc-500">
+        <div className="flex items-center justify-between pb-4 pl-6 pr-6 pt-0 text-xs text-[var(--text-4)]">
           <span>Updated {relativeUpdated(project.updatedAt)}</span>
           <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
             <button
@@ -215,8 +215,8 @@ function ProjectCard({
               onClick={onToggleFavorite}
               className={`rounded-md p-1.5 ${
                 project.isFavorite
-                  ? 'text-amber-300 hover:bg-zinc-800 hover:text-amber-200'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                  ? 'text-amber-300 hover:bg-[var(--surface-subtle)] hover:text-amber-200'
+                  : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-2)]'
               }`}
               aria-label={project.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             >
@@ -225,7 +225,7 @@ function ProjectCard({
             <button
               type="button"
               onClick={onEdit}
-              className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              className="rounded-md p-1.5 text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-2)]"
               aria-label="Edit project"
             >
               <EditIcon />
@@ -233,7 +233,7 @@ function ProjectCard({
             <button
               type="button"
               onClick={onDelete}
-              className="rounded-md p-1.5 text-rose-400 hover:bg-zinc-800 hover:text-rose-300"
+              className="rounded-md p-1.5 text-rose-400 hover:bg-[var(--surface-subtle)] hover:text-rose-300"
               aria-label="Delete project"
             >
               <TrashIcon />
@@ -245,18 +245,18 @@ function ProjectCard({
   }
 
   return (
-    <div className="group overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/50 transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10">
+    <div className="group overflow-hidden rounded-lg border border-[var(--border-1)] bg-[var(--surface-elevated)] transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10">
       <div className="flex items-center gap-4 p-4">
         <button
           type="button"
           onClick={onOpen}
           className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-md ${thumbnailClass(project)}`}
         >
-          <span className="font-bold uppercase text-zinc-100/40">{(project.name || 'U').substring(0, 1)}</span>
+          <span className="font-bold uppercase text-[var(--text-1)]/40">{(project.name || 'U').substring(0, 1)}</span>
         </button>
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
-          <h3 className="truncate font-medium text-zinc-100">{project.name || 'Untitled project'}</h3>
-          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+          <h3 className="truncate font-medium text-[var(--text-1)]">{project.name || 'Untitled project'}</h3>
+          <div className="mt-1 flex items-center gap-2 text-xs text-[var(--text-3)]">
             <span className={`inline-block h-2 w-2 rounded-full ${statusColor(status)}`} />
             {status} • Updated {relativeUpdated(project.updatedAt)}
           </div>
@@ -267,8 +267,8 @@ function ProjectCard({
             onClick={onToggleFavorite}
             className={`rounded-md p-2 ${
               project.isFavorite
-                ? 'text-amber-300 hover:bg-zinc-800 hover:text-amber-200'
-                : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
+                ? 'text-amber-300 hover:bg-[var(--surface-subtle)] hover:text-amber-200'
+                : 'text-[var(--text-2)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'
             }`}
             aria-label={project.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           >
@@ -277,7 +277,7 @@ function ProjectCard({
           <button
             type="button"
             onClick={onEdit}
-            className="rounded-md p-2 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+            className="rounded-md p-2 text-[var(--text-2)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]"
             aria-label="Edit project"
           >
             <EditIcon />
@@ -285,7 +285,7 @@ function ProjectCard({
           <button
             type="button"
             onClick={onDelete}
-            className="rounded-md p-2 text-rose-400 hover:bg-zinc-800 hover:text-rose-300"
+            className="rounded-md p-2 text-rose-400 hover:bg-[var(--surface-subtle)] hover:text-rose-300"
             aria-label="Delete project"
           >
             <TrashIcon />
@@ -370,11 +370,11 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
   };
 
   return (
-    <div className="min-h-[calc(100vh-64px)] flex flex-col gap-8 bg-[#09090b] p-6 text-zinc-50 md:p-8">
+    <div className="min-h-[calc(100vh-64px)] flex flex-col gap-8 bg-[var(--surface-app)] p-6 text-[var(--text-1)] md:p-8">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{mode === 'favorites' ? 'Favorites' : 'Projects'}</h1>
-          <p className="text-zinc-400">
+          <p className="text-[var(--text-3)]">
             {mode === 'favorites'
               ? 'Quick access to your starred signage projects.'
               : 'Manage your signage engineering files.'}
@@ -396,24 +396,24 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
         ) : null}
       </div>
 
-      <div className="flex flex-col items-center justify-between gap-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4 sm:flex-row">
+      <div className="flex flex-col items-center justify-between gap-4 rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)] p-4 sm:flex-row">
         <div className="relative w-full sm:w-96">
           <div className="absolute left-2.5 top-2.5">
             <SearchIcon />
           </div>
           <input
             placeholder="Search projects..."
-            className="h-10 w-full rounded-md border border-zinc-800 bg-[#09090b] pl-9 pr-3 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none"
+            className="h-10 w-full rounded-md border border-[var(--border-1)] bg-[var(--surface-app)] pl-9 pr-3 text-sm text-[var(--text-1)] placeholder:text-[var(--text-4)] focus:border-blue-500 focus:outline-none"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-[#09090b] p-1">
+        <div className="flex items-center gap-2 rounded-md border border-[var(--border-1)] bg-[var(--surface-app)] p-1">
           <button
             type="button"
             onClick={() => setViewMode('grid')}
             className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-              viewMode === 'grid' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-100'
+              viewMode === 'grid' ? 'bg-[var(--surface-subtle)] text-[var(--text-1)]' : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
             }`}
           >
             <GridIcon />
@@ -422,7 +422,7 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
             type="button"
             onClick={() => setViewMode('list')}
             className={`inline-flex h-8 w-8 items-center justify-center rounded ${
-              viewMode === 'list' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-100'
+              viewMode === 'list' ? 'bg-[var(--surface-subtle)] text-[var(--text-1)]' : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
             }`}
           >
             <ListIcon />
@@ -431,12 +431,12 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
       </div>
 
       {!loading && filteredProjects.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/50">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800">
-            <SearchIcon className="h-6 w-6 text-zinc-500" />
+        <div className="flex h-64 flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border-1)] bg-[var(--surface-elevated)]">
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--surface-subtle)]">
+            <SearchIcon className="h-6 w-6 text-[var(--text-4)]" />
           </div>
           <h3 className="text-lg font-medium">No projects found</h3>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-[var(--text-3)]">
             {mode === 'favorites'
               ? 'Star projects to see them in Favorites.'
               : 'Try adjusting your search query.'}
@@ -484,16 +484,16 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
           description="Set up a new signage workspace for your team."
           isOpen={isCreateOpen}
           onClose={() => setIsCreateOpen(false)}
-          panelClassName="max-w-md rounded-xl border border-zinc-800 bg-zinc-900/95 text-zinc-100 shadow-2xl backdrop-blur"
-          headerClassName="border-zinc-800 bg-zinc-900/80"
-          bodyClassName="bg-zinc-900/90"
-          titleClassName="text-zinc-100 text-xl font-semibold tracking-tight"
-          descriptionClassName="text-zinc-400 text-sm"
+          panelClassName="max-w-md rounded-xl border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-1)] shadow-2xl backdrop-blur"
+          headerClassName="border-[var(--border-1)] bg-[var(--surface-elevated)]"
+          bodyClassName="bg-[var(--surface-panel)]"
+          titleClassName="text-[var(--text-1)] text-xl font-semibold tracking-tight"
+          descriptionClassName="text-[var(--text-3)] text-sm"
           hideFooter
         >
           <form onSubmit={(e) => void handleCreate(e)} className="space-y-4">
             <div className="grid gap-2">
-              <label htmlFor="new-project-name" className="text-sm font-medium text-zinc-300">
+              <label htmlFor="new-project-name" className="text-sm font-medium text-[var(--text-2)]">
                 Project name
               </label>
               <input
@@ -503,11 +503,11 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
                 onChange={(e) => setNewName(e.target.value)}
                 placeholder="Project name"
                 required
-                className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/70 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+                className="h-10 w-full rounded-md border border-[var(--border-1)] bg-[var(--surface-canvas)] px-3 text-sm text-[var(--text-1)] placeholder:text-[var(--text-4)] transition-colors focus:border-blue-500 focus:outline-none"
               />
             </div>
             <div className="grid gap-2">
-              <label htmlFor="new-project-description" className="text-sm font-medium text-zinc-300">
+              <label htmlFor="new-project-description" className="text-sm font-medium text-[var(--text-2)]">
                 Description
               </label>
               <input
@@ -516,14 +516,14 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
                 value={newDescription}
                 onChange={(e) => setNewDescription(e.target.value)}
                 placeholder="Optional notes"
-                className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/70 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+                className="h-10 w-full rounded-md border border-[var(--border-1)] bg-[var(--surface-canvas)] px-3 text-sm text-[var(--text-1)] placeholder:text-[var(--text-4)] transition-colors focus:border-blue-500 focus:outline-none"
               />
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setIsCreateOpen(false)}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 px-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-700"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border-2)] bg-[var(--surface-subtle)] px-3 text-sm font-medium text-[var(--text-2)] transition-colors hover:bg-[var(--surface-strong)]"
               >
                 Cancel
               </button>
@@ -546,16 +546,16 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
           setIsEditOpen(false);
           setProjectToEdit(null);
         }}
-        panelClassName="max-w-md rounded-xl border border-zinc-800 bg-zinc-900/95 text-zinc-100 shadow-2xl backdrop-blur"
-        headerClassName="border-zinc-800 bg-zinc-900/80"
-        bodyClassName="bg-zinc-900/90"
-        titleClassName="text-zinc-100 text-xl font-semibold tracking-tight"
-        descriptionClassName="text-zinc-400 text-sm"
+        panelClassName="max-w-md rounded-xl border border-[var(--border-1)] bg-[var(--surface-panel)] text-[var(--text-1)] shadow-2xl backdrop-blur"
+        headerClassName="border-[var(--border-1)] bg-[var(--surface-elevated)]"
+        bodyClassName="bg-[var(--surface-panel)]"
+        titleClassName="text-[var(--text-1)] text-xl font-semibold tracking-tight"
+        descriptionClassName="text-[var(--text-3)] text-sm"
         hideFooter
       >
         <form onSubmit={(e) => void handleRename(e)} className="space-y-4">
           <div className="grid gap-2">
-            <label htmlFor="edit-project-name" className="text-sm font-medium text-zinc-300">
+            <label htmlFor="edit-project-name" className="text-sm font-medium text-[var(--text-2)]">
               Project name
             </label>
             <input
@@ -565,7 +565,7 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
             onChange={(e) => setEditName(e.target.value)}
             placeholder="Project name"
             required
-              className="h-10 w-full rounded-md border border-zinc-800 bg-zinc-950/70 px-3 text-sm text-zinc-100 placeholder:text-zinc-500 transition-colors focus:border-blue-500 focus:outline-none"
+              className="h-10 w-full rounded-md border border-[var(--border-1)] bg-[var(--surface-canvas)] px-3 text-sm text-[var(--text-1)] placeholder:text-[var(--text-4)] transition-colors focus:border-blue-500 focus:outline-none"
             />
           </div>
           <div className="flex justify-end gap-2 pt-1">
@@ -575,7 +575,7 @@ export function ProjectsListPage({ mode = 'all' }: { mode?: 'all' | 'favorites' 
                 setIsEditOpen(false);
                 setProjectToEdit(null);
               }}
-              className="inline-flex h-9 items-center justify-center rounded-md border border-zinc-700 bg-zinc-800 px-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-700"
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border-2)] bg-[var(--surface-subtle)] px-3 text-sm font-medium text-[var(--text-2)] transition-colors hover:bg-[var(--surface-strong)]"
             >
               Cancel
             </button>

@@ -28,6 +28,56 @@ interface ValidationResult {
 }
 
 const TOKEN_RE = /([a-zA-Z])|([-+]?\d*\.?\d+(?:e[-+]?\d+)?)/g;
+const CURVE_SAMPLE_STEPS = 12;
+
+function lerp(a: number, b: number, t: number) {
+  return a + (b - a) * t;
+}
+
+function sampleQuadraticBezier(
+  p0: Point,
+  p1: Point,
+  p2: Point,
+  steps = CURVE_SAMPLE_STEPS,
+): Point[] {
+  const points: Point[] = [];
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const mt = 1 - t;
+    points.push({
+      x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x,
+      y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y,
+    });
+  }
+  return points;
+}
+
+function sampleCubicBezier(
+  p0: Point,
+  p1: Point,
+  p2: Point,
+  p3: Point,
+  steps = CURVE_SAMPLE_STEPS,
+): Point[] {
+  const points: Point[] = [];
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const mt = 1 - t;
+    points.push({
+      x:
+        mt * mt * mt * p0.x +
+        3 * mt * mt * t * p1.x +
+        3 * mt * t * t * p2.x +
+        t * t * t * p3.x,
+      y:
+        mt * mt * mt * p0.y +
+        3 * mt * mt * t * p1.y +
+        3 * mt * t * t * p2.y +
+        t * t * t * p3.y,
+    });
+  }
+  return points;
+}
 
 function commandArity(cmd: string) {
   switch (cmd.toUpperCase()) {
@@ -136,11 +186,18 @@ function parseContours(pathData: string): Contour[] {
       continue;
     }
     if (upper === 'C') {
+      const c1x = isRel ? cx + values[0] : values[0];
+      const c1y = isRel ? cy + values[1] : values[1];
       const c2x = isRel ? cx + values[2] : values[2];
       const c2y = isRel ? cy + values[3] : values[3];
       const x = isRel ? cx + values[4] : values[4];
       const y = isRel ? cy + values[5] : values[5];
-      pushPoint({ x, y });
+      sampleCubicBezier(
+        { x: cx, y: cy },
+        { x: c1x, y: c1y },
+        { x: c2x, y: c2y },
+        { x, y },
+      ).forEach(pushPoint);
       cx = x;
       cy = y;
       prevC = { x: c2x, y: c2y };
@@ -148,11 +205,18 @@ function parseContours(pathData: string): Contour[] {
       continue;
     }
     if (upper === 'S') {
+      const c1x = prevC ? cx + (cx - prevC.x) : cx;
+      const c1y = prevC ? cy + (cy - prevC.y) : cy;
       const c2x = isRel ? cx + values[0] : values[0];
       const c2y = isRel ? cy + values[1] : values[1];
       const x = isRel ? cx + values[2] : values[2];
       const y = isRel ? cy + values[3] : values[3];
-      pushPoint({ x, y });
+      sampleCubicBezier(
+        { x: cx, y: cy },
+        { x: c1x, y: c1y },
+        { x: c2x, y: c2y },
+        { x, y },
+      ).forEach(pushPoint);
       cx = x;
       cy = y;
       prevC = { x: c2x, y: c2y };
@@ -164,7 +228,11 @@ function parseContours(pathData: string): Contour[] {
       const c1y = isRel ? cy + values[1] : values[1];
       const x = isRel ? cx + values[2] : values[2];
       const y = isRel ? cy + values[3] : values[3];
-      pushPoint({ x, y });
+      sampleQuadraticBezier(
+        { x: cx, y: cy },
+        { x: c1x, y: c1y },
+        { x, y },
+      ).forEach(pushPoint);
       cx = x;
       cy = y;
       prevQ = { x: c1x, y: c1y };
@@ -176,7 +244,11 @@ function parseContours(pathData: string): Contour[] {
       const reflectedControlY: number = prevQ ? cy + (cy - prevQ.y) : cy;
       const x = isRel ? cx + values[0] : values[0];
       const y = isRel ? cy + values[1] : values[1];
-      pushPoint({ x, y });
+      sampleQuadraticBezier(
+        { x: cx, y: cy },
+        { x: reflectedControlX, y: reflectedControlY },
+        { x, y },
+      ).forEach(pushPoint);
       cx = x;
       cy = y;
       prevQ = { x: reflectedControlX, y: reflectedControlY };
@@ -186,7 +258,13 @@ function parseContours(pathData: string): Contour[] {
     if (upper === 'A') {
       const x = isRel ? cx + values[5] : values[5];
       const y = isRel ? cy + values[6] : values[6];
-      pushPoint({ x, y });
+      for (let i = 1; i <= CURVE_SAMPLE_STEPS; i += 1) {
+        const t = i / CURVE_SAMPLE_STEPS;
+        pushPoint({
+          x: lerp(cx, x, t),
+          y: lerp(cy, y, t),
+        });
+      }
       cx = x;
       cy = y;
       prevQ = null;
@@ -225,6 +303,22 @@ function intersects(a1: Point, a2: Point, b1: Point, b2: Point) {
   return false;
 }
 
+function samePoint(a: Point, b: Point, eps = 1e-6) {
+  return Math.abs(a.x - b.x) <= eps && Math.abs(a.y - b.y) <= eps;
+}
+
+function sharesEndpoint(
+  s1: { a: Point; b: Point },
+  s2: { a: Point; b: Point },
+) {
+  return (
+    samePoint(s1.a, s2.a) ||
+    samePoint(s1.a, s2.b) ||
+    samePoint(s1.b, s2.a) ||
+    samePoint(s1.b, s2.b)
+  );
+}
+
 function hasSelfIntersection(contour: Contour) {
   const segments: Array<{ a: Point; b: Point }> = [];
   for (let i = 0; i < contour.points.length - 1; i += 1) {
@@ -237,7 +331,10 @@ function hasSelfIntersection(contour: Contour) {
     for (let j = i + 1; j < segments.length; j += 1) {
       if (Math.abs(i - j) <= 1) continue;
       if (contour.closed && i === 0 && j === segments.length - 1) continue;
-      if (intersects(segments[i].a, segments[i].b, segments[j].a, segments[j].b)) return true;
+      if (intersects(segments[i].a, segments[i].b, segments[j].a, segments[j].b)) {
+        if (sharesEndpoint(segments[i], segments[j])) continue;
+        return true;
+      }
     }
   }
   return false;
@@ -309,4 +406,3 @@ export function validateShapePathPayload(
 
   return { ok: true };
 }
-

@@ -27,7 +27,7 @@ function PencilIconSmall() {
 
 function TrashIconSmall() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.15" className="h-4 w-4" aria-hidden>
       <path d="M3 6h18" />
       <path d="M8 6V4h8v2" />
       <path d="M19 6l-1 14H6L5 6" />
@@ -249,25 +249,25 @@ export function DesignerPage() {
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#09090b] p-3 text-zinc-100 [--surface-panel:#111111] [--surface-elevated:#171717] [--surface-subtle:#0f0f10] [--surface-strong:#222225] [--text-1:#f4f4f5] [--text-2:#d4d4d8] [--text-3:#a1a1aa] [--text-4:#71717a] [--border-1:#27272a] [--border-2:#3f3f46] [--stage-bg:#0b0b0c] [--stage-grid-line:rgba(161,161,170,0.2)]">
-      <header className="rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[var(--surface-app)] p-3 text-[var(--text-1)]">
+      <header className="rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)]">
         <div className="flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
             <Button
               variant="outline"
               size="icon"
               onClick={() => navigate('/')}
-              className="border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700"
+              className="border-[var(--border-2)] bg-[var(--surface-subtle)] text-[var(--text-1)] hover:bg-[var(--surface-strong)]"
             >
               ⌂
             </Button>
-            <span className="text-3xl font-semibold text-zinc-100">Channel Letter</span>
+            <span className="text-3xl font-semibold text-[var(--text-1)]">Channel Letter</span>
           </div>
           <div
             className={`rounded-full border px-3 py-1 text-xs font-medium ${
               syncState === 'error'
                 ? 'border-rose-500 text-rose-400'
-                : 'border-zinc-700 text-zinc-400'
+                : 'border-[var(--border-2)] text-[var(--text-3)]'
             }`}
           >
             {syncLabel}
@@ -276,22 +276,22 @@ export function DesignerPage() {
       </header>
 
       <main className="grid h-full min-h-0 flex-1 grid-cols-[76px_minmax(0,1fr)_510px] gap-3 overflow-hidden">
-        <aside className="h-full min-h-0 rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90 p-2">
+        <aside className="h-full min-h-0 rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-2">
           <div className="flex flex-col items-center gap-2">
             <ToolRailButton srLabel="Zoom In" icon={<span aria-hidden className="text-lg">⊕</span>} />
             <ToolRailButton srLabel="Zoom Out" icon={<span aria-hidden className="text-lg">⊖</span>} />
           </div>
         </aside>
 
-        <section className="h-full min-h-0 overflow-hidden rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-950/80">
+        <section className="h-full min-h-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-canvas)]">
           <div className="h-full min-h-0">
             <CanvasStage onCharacterMutate={markDirty} />
           </div>
         </section>
 
-        <aside className="h-full min-h-0 space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-zinc-800 bg-zinc-900/90 p-4">
-          <div className="space-y-2 rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-950/60 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+        <aside className="h-full min-h-0 space-y-3 overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--border-1)] bg-[var(--surface-panel)] p-4">
+          <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-canvas)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)]">
               Characters
             </div>
             <div className="flex flex-wrap gap-2">
@@ -302,8 +302,8 @@ export function DesignerPage() {
                     key={char.id}
                     className={`inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-1 transition-colors ${
                       selected
-                        ? 'border-zinc-500 bg-zinc-800/95 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
-                        : 'border-zinc-700 bg-zinc-900/80 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/80'
+                        ? 'border-[var(--accent-300)] bg-[var(--surface-subtle)]/95 text-[var(--text-1)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
+                        : 'border-[var(--border-2)] bg-[var(--surface-elevated)] text-[var(--text-2)] hover:border-[var(--border-2)] hover:bg-[var(--surface-subtle)]/80'
                     }`}
                   >
                     <button
@@ -313,14 +313,14 @@ export function DesignerPage() {
                     >
                       {char.glyph}
                     </button>
-                    <div className="ml-1 flex items-center gap-1 border-l border-zinc-700 pl-1">
+                    <div className="ml-1 flex items-center gap-1 border-l border-[var(--border-2)] pl-1">
                       {projectId && projectId !== 'new' && (
                         <button
                           type="button"
                           aria-label={`Edit character ${char.glyph} in manual editor`}
                           title="Edit character"
                           onClick={() => navigate(`/projects/${projectId}/manual/${char.id}`)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-600 bg-zinc-900 text-zinc-200 transition-colors hover:border-zinc-500 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-2)] bg-[var(--surface-elevated)] text-[var(--text-2)] transition-colors hover:border-[var(--border-2)] hover:bg-[var(--surface-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80"
                         >
                           <PencilIconSmall />
                         </button>
@@ -330,7 +330,7 @@ export function DesignerPage() {
                         aria-label={`Delete character ${char.glyph}`}
                         title="Delete character"
                         onClick={() => handleRemoveCharacter(char.id)}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-rose-700/70 bg-rose-950/30 text-rose-300 transition-colors hover:border-rose-600 hover:bg-rose-900/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/80"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--danger-500)]/70 bg-[var(--danger-soft)] text-[var(--danger-500)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] transition-colors hover:border-[var(--danger-500)] hover:bg-[var(--danger-soft)]/75 hover:text-[var(--danger-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--danger-500)]/85"
                       >
                         <TrashIconSmall />
                       </button>
@@ -340,17 +340,17 @@ export function DesignerPage() {
               })}
             </div>
             <div
-              className="space-y-2 rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-900/50 p-3"
+              className="space-y-2 rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-elevated)] p-3"
               role="group"
               aria-label="Add Character"
             >
               <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--text-3)]">
                   Add Character
                 </div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-300">
-                  <span className="text-zinc-500">Selected</span>
-                  <span className="font-semibold text-zinc-100">{newCharacter}</span>
+                <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-2)] bg-[var(--surface-canvas)] px-2.5 py-1 text-xs text-[var(--text-2)]">
+                  <span className="text-[var(--text-4)]">Selected</span>
+                  <span className="font-semibold text-[var(--text-1)]">{newCharacter}</span>
                 </div>
               </div>
               <div className="grid grid-cols-7 gap-1.5">
@@ -364,8 +364,8 @@ export function DesignerPage() {
                       onClick={() => setNewCharacter(char)}
                       className={`h-8 rounded-md border text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/80 ${
                         isSelected
-                          ? 'border-blue-500/70 bg-blue-600/20 text-blue-100'
-                          : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800'
+                          ? 'border-[var(--accent-400)] bg-[var(--accent-soft)] text-[var(--accent-600)]'
+                          : 'border-[var(--border-2)] bg-[var(--surface-elevated)] text-[var(--text-2)] hover:border-[var(--border-2)] hover:bg-[var(--surface-subtle)]'
                       }`}
                     >
                       {char}
@@ -383,7 +383,7 @@ export function DesignerPage() {
             </div>
           </div>
 
-          <div className="space-y-2 rounded-[var(--radius-md)] bg-zinc-900/60 p-1">
+          <div className="space-y-2 rounded-[var(--radius-md)] bg-[var(--surface-elevated)] p-1">
             <FieldRow
               label="Selected Character"
               control={
@@ -399,7 +399,7 @@ export function DesignerPage() {
               control={
                 <Button
                   variant="outline"
-                  className="h-11 w-full justify-center border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
+                  className="h-11 w-full justify-center border-[var(--border-2)] bg-[var(--surface-elevated)] text-[var(--text-2)] hover:bg-[var(--surface-subtle)]"
                   disabled={!selectedCharId || !projectId || projectId === 'new'}
                   onClick={() => {
                     if (!selectedCharId || !projectId || projectId === 'new') return;
@@ -429,12 +429,12 @@ export function DesignerPage() {
             <FieldRow
               label="Height"
               control={
-                <div className="space-y-1 rounded-[var(--radius-md)] bg-zinc-900 px-3 py-2">
-                  <div className="flex items-center justify-between text-sm text-zinc-300">
+                <div className="space-y-1 rounded-[var(--radius-md)] bg-[var(--surface-elevated)] px-3 py-2">
+                  <div className="flex items-center justify-between text-sm text-[var(--text-2)]">
                     <span>{selectedCharacter ? Math.round(selectedCharacter.fontSize) : '-'}</span>
-                    <span className="text-xs text-zinc-500">Manual Editor only</span>
+                    <span className="text-xs text-[var(--text-4)]">Manual Editor only</span>
                   </div>
-                  <div className="text-xs text-zinc-500">
+                  <div className="text-xs text-[var(--text-4)]">
                     Character height is edited in Manual Editor.
                   </div>
                 </div>
@@ -503,7 +503,7 @@ export function DesignerPage() {
             />
           </div>
 
-          <div className="rounded-[var(--radius-md)] border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-200">
+          <div className="rounded-[var(--radius-md)] border border-[var(--border-1)] bg-[var(--surface-canvas)] p-3 text-sm text-[var(--text-2)]">
             <div className="flex items-center justify-between">
               <span>Total Modules</span>
               <strong>{totalModules}</strong>

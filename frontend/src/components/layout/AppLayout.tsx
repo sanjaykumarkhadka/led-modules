@@ -1,6 +1,7 @@
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '../ui/Button';
+import { ThemeToggleButton } from '../ui/ThemeToggleButton';
 
 interface AppLayoutProps {
   userDisplayName: string;
@@ -21,29 +22,17 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
   const isProjectsListRoute = location.pathname === '/projects' || location.pathname === '/favorites';
   const isManualEditorRoute = location.pathname.includes('/manual/');
   const isProjectDetailsRoute = isDesignerRoute && !isManualEditorRoute;
-  const isDarkWorkspaceRoute = isProjectsListRoute || isProjectDetailsRoute || isManualEditorRoute;
-
-  useEffect(() => {
-    if (isDarkWorkspaceRoute) {
-      document.body.classList.add('route-projects-dark');
-      return () => {
-        document.body.classList.remove('route-projects-dark');
-      };
-    }
-    document.body.classList.remove('route-projects-dark');
-    return undefined;
-  }, [isDarkWorkspaceRoute]);
 
   return (
-    <div className={`min-h-screen ${isDarkWorkspaceRoute ? 'bg-[#09090b] text-zinc-50' : 'text-[var(--text-1)]'}`}>
+    <div className="min-h-screen bg-[var(--surface-app)] text-[var(--text-1)]">
       {!isManualEditorRoute && (
-        <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-900/85 backdrop-blur-sm">
+        <header className="sticky top-0 z-40 border-b border-[var(--border-1)] bg-[var(--header-bg)] backdrop-blur-sm">
           <div className="mx-auto flex h-16 w-full max-w-[1680px] items-center justify-between gap-4 px-4 md:px-6">
             <div className="flex items-center gap-8">
               <button
                 type="button"
                 onClick={() => navigate('/projects')}
-                className="flex items-center gap-2 text-lg font-bold text-zinc-100"
+                className="flex items-center gap-2 text-lg font-bold text-[var(--text-1)]"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded bg-blue-600">
                   <svg viewBox="0 0 24 24" className="h-5 w-5 text-white" aria-hidden>
@@ -62,8 +51,8 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
                   onClick={() => navigate('/projects')}
                   className={`text-sm font-medium transition-colors ${
                     location.pathname === '/projects'
-                      ? 'text-zinc-100'
-                      : 'text-zinc-400 hover:text-zinc-200'
+                      ? 'text-[var(--text-1)]'
+                      : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
                   }`}
                 >
                   Projects
@@ -73,8 +62,8 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
                   onClick={() => navigate('/favorites')}
                   className={`text-sm font-medium transition-colors ${
                     location.pathname === '/favorites'
-                      ? 'text-zinc-100'
-                      : 'text-zinc-400 hover:text-zinc-200'
+                      ? 'text-[var(--text-1)]'
+                      : 'text-[var(--text-3)] hover:text-[var(--text-1)]'
                   }`}
                 >
                   Favorites
@@ -84,9 +73,10 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
 
             <div className="flex items-center gap-2 md:gap-3">
               {headerActions}
+              <ThemeToggleButton />
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-200 hover:bg-zinc-800"
+                className="inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-[var(--text-2)] hover:bg-[var(--surface-subtle)]"
               >
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
                   <path
@@ -99,7 +89,7 @@ export function AppLayout({ userDisplayName, onLogout, headerActions, children }
                 </svg>
                 <span className="hidden sm:inline">{userDisplayName}</span>
               </button>
-              <Button variant="ghost" size="icon" onClick={onLogout} className="text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100">
+              <Button variant="ghost" size="icon" onClick={onLogout} className="text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]">
                 <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden>
                   <path
                     d="M15 17l5-5-5-5M20 12H9M12 19v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h5a2 2 0 0 1 2 2v1"

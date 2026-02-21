@@ -19,6 +19,15 @@ function App() {
     useAuthStore();
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const loginRouteActive = !user;
+    document.body.classList.toggle('route-login-dark', loginRouteActive);
+    return () => {
+      document.body.classList.remove('route-login-dark');
+    };
+  }, [user]);
+
+  useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
@@ -85,6 +94,10 @@ function App() {
         <Route path="/favorites" element={<ProjectsListPage mode="favorites" />} />
         <Route path="/projects/:projectId" element={<DesignerPage />} />
         <Route path="/projects/:projectId/manual/:charId" element={<ManualEditorRoutePage />} />
+        <Route
+          path="/projects/:projectId/manual/:charId/:editorMode"
+          element={<ManualEditorRoutePage />}
+        />
         <Route path="*" element={<Navigate to="/projects" />} />
       </Routes>
     </AppLayout>

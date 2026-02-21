@@ -14,7 +14,11 @@ function isValidCharIdForBlocks(
 
 export function ManualEditorRoutePage() {
   const navigate = useNavigate();
-  const { projectId, charId } = useParams<{ projectId: string; charId: string }>();
+  const { projectId, charId, editorMode } = useParams<{
+    projectId: string;
+    charId: string;
+    editorMode?: string;
+  }>();
   const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const currentProjectId = useProjectsStore((state) => state.currentProjectId);
   const loading = useProjectsStore((state) => state.loading);
@@ -36,6 +40,25 @@ export function ManualEditorRoutePage() {
     if (!projectId || projectId === 'new' || !charId || !isProjectReady) return false;
     return isValidCharIdForBlocks(charId, charactersByBlock);
   }, [charactersByBlock, charId, isProjectReady, projectId]);
+  const resolvedMode = editorMode === 'shape' ? 'shape' : 'module';
+  const hasInvalidMode = editorMode != null && editorMode !== 'module' && editorMode !== 'shape';
+
+  useEffect(() => {
+    if (!projectId || projectId === 'new' || !charId) return;
+    if (!isProjectReady || loading) return;
+    if (hasInvalidMode) {
+      notify({
+        variant: 'error',
+        title: 'Invalid editor mode',
+        description: 'Switching back to module mode.',
+      });
+      navigate(`/projects/${projectId}/manual/${charId}/module`, { replace: true });
+      return;
+    }
+    if (!editorMode) {
+      navigate(`/projects/${projectId}/manual/${charId}/module`, { replace: true });
+    }
+  }, [charId, editorMode, hasInvalidMode, isProjectReady, loading, navigate, notify, projectId]);
 
   useEffect(() => {
     if (!projectId || projectId === 'new' || !charId) return;
@@ -65,6 +88,8 @@ export function ManualEditorRoutePage() {
     <ManualDesignerPage
       projectId={projectId}
       charId={charId}
+      mode={resolvedMode}
+      onSwitchMode={(nextMode) => navigate(`/projects/${projectId}/manual/${charId}/${nextMode}`)}
       onBack={() => navigate(`/projects/${projectId}`)}
     />
   );

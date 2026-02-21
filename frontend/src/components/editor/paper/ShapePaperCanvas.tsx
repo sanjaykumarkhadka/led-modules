@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import paper from 'paper';
 import { useTheme } from '../../ui/ThemeProvider';
-import { buildEditableAnchorPoints } from '../../../core/math/pathEditor';
+import {
+  buildEditableAnchorDebugGroups,
+  buildEditablePathPoints,
+} from '../../../core/math/pathEditor';
 
 export interface ShapePaperCanvasProps {
   pathData: string;
@@ -35,17 +38,21 @@ function screenTolerance(scope: paper.PaperScope, px: number) {
 interface AnchorRecord {
   circle: paper.Path.Circle;
   anchorId: string;
-  /** Index into the flat, all-subpaths segment list */
-  globalIndex: number;
-  subPathIndex: number;
-  segmentIndex: number;
+  members: Array<{
+    subPathIndex: number;
+    segmentIndex: number;
+  }>;
 }
 
 interface ActiveDrag {
   record: AnchorRecord;
   /** Offset from segment position to mouse position at drag start (project coords) */
   pointerOffset: paper.Point;
-  lastValidPt: paper.Point;
+  lastValidPoints: Array<{
+    subPathIndex: number;
+    segmentIndex: number;
+    point: paper.Point;
+  }>;
 }
 
 export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
@@ -86,6 +93,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
   const isLocalDragRef = useRef(false);
   const hasAutoFittedRef = useRef(false);
   const boundsChangedRef = useRef(false);
+  const minZoomRef = useRef(0);
   const lastLocalAcceptedPathRef = useRef<string | null>(null);
   const lastExternalAppliedPathRef = useRef<string | null>(null);
   const lastEditorReadyPathRef = useRef<string | null>(null);
@@ -128,6 +136,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       const cW = el.offsetWidth || el.width || 800;
       const cH = el.offsetHeight || el.height || 600;
       scope.view.zoom = Math.min(cW / paddedW, cH / paddedH);
+      minZoomRef.current = scope.view.zoom;
       scope.view.center = new scope.Point(b.x + b.width / 2, b.y + b.height / 2);
     },
     [],
@@ -156,7 +165,7 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       const scope = scopeRef.current;
       if (!scope) return;
       for (const rec of anchorRecordsRef.current) {
-        applyAnchorStyle(rec, String(rec.globalIndex) === selectedId, scope.view.zoom);
+        applyAnchorStyle(rec, rec.anchorId === selectedId, scope.view.zoom);
       }
     },
     [applyAnchorStyle],
@@ -244,34 +253,47 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       // ── Anchor handles (anchors layer) ──
       anchorsLayerRef.current?.activate();
       const subPaths = getSubPaths(editCp);
-      const editableAnchors = buildEditableAnchorPoints(editCp.pathData);
-      if (import.meta.env.DEV && editableAnchors.length !== subPaths.reduce((acc, sp) => acc + (sp.segments?.length ?? 0), 0)) {
+      const rawAnchors = buildEditablePathPoints(editCp.pathData).filter((point) => point.kind === 'anchor');
+      const groups = buildEditableAnchorDebugGroups(editCp.pathData);
+      const memberToRepresentative = new Map<string, string>();
+      for (const group of groups) {
+        for (const memberId of group.memberIds) {
+          memberToRepresentative.set(memberId, group.representativeId);
+        }
+      }
+      if (import.meta.env.DEV && rawAnchors.length !== subPaths.reduce((acc, sp) => acc + (sp.segments?.length ?? 0), 0)) {
         console.debug('[shape-paper] anchor mapping count mismatch', {
-          editableAnchors: editableAnchors.length,
+          editableAnchors: rawAnchors.length,
           paperSegments: subPaths.reduce((acc, sp) => acc + (sp.segments?.length ?? 0), 0),
         });
       }
+      const groupedRecords = new Map<string, AnchorRecord>();
       let globalIdx = 0;
       for (let spi = 0; spi < subPaths.length; spi++) {
         const sp = subPaths[spi];
         if (!sp.segments) continue;
         for (let si = 0; si < sp.segments.length; si++) {
           const pt = sp.segments[si].point;
-          const circle = new scope.Path.Circle(pt, HANDLE_RADIUS);
-          circle.fillColor = new scope.Color(COLORS.anchorFill);
-          circle.strokeColor = new scope.Color(COLORS.anchorStroke);
-          circle.strokeWidth = 0.9 / scope.view.zoom;
-          const mappedAnchorId = editableAnchors[globalIdx]?.id ?? String(globalIdx);
-          anchorRecordsRef.current.push({
-            circle,
-            anchorId: mappedAnchorId,
-            globalIndex: globalIdx,
-            subPathIndex: spi,
-            segmentIndex: si,
-          });
+          const rawAnchorId = rawAnchors[globalIdx]?.id ?? `anchor:${globalIdx}`;
+          const anchorId = memberToRepresentative.get(rawAnchorId) ?? rawAnchorId;
+          const existing = groupedRecords.get(anchorId);
+          if (!existing) {
+            const circle = new scope.Path.Circle(pt, HANDLE_RADIUS);
+            circle.fillColor = new scope.Color(COLORS.anchorFill);
+            circle.strokeColor = new scope.Color(COLORS.anchorStroke);
+            circle.strokeWidth = 0.9 / scope.view.zoom;
+            groupedRecords.set(anchorId, {
+              circle,
+              anchorId,
+              members: [{ subPathIndex: spi, segmentIndex: si }],
+            });
+          } else {
+            existing.members.push({ subPathIndex: spi, segmentIndex: si });
+          }
           globalIdx++;
         }
       }
+      anchorRecordsRef.current = Array.from(groupedRecords.values());
 
       // Apply selected visual.
       refreshAnchorVisuals(selectedPointIdRef.current);
@@ -336,14 +358,23 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
           const editCp = editPathRef.current;
           if (!editCp) return;
           const subPaths = getSubPaths(editCp);
-          const sp = subPaths[rec.subPathIndex];
-          const seg = sp?.segments?.[rec.segmentIndex];
+          const primary = rec.members[0];
+          const sp = primary ? subPaths[primary.subPathIndex] : undefined;
+          const seg = primary ? sp?.segments?.[primary.segmentIndex] : undefined;
           if (!seg) return;
 
           activeDragRef.current = {
             record: rec,
             pointerOffset: evt.point.subtract(seg.point),
-            lastValidPt: seg.point.clone(),
+            lastValidPoints: rec.members.map((member) => {
+              const memberPath = subPaths[member.subPathIndex];
+              const memberSeg = memberPath?.segments?.[member.segmentIndex];
+              return {
+                subPathIndex: member.subPathIndex,
+                segmentIndex: member.segmentIndex,
+                point: memberSeg ? memberSeg.point.clone() : seg.point.clone(),
+              };
+            }),
           };
           isLocalDragRef.current = true;
           onSelectPointRef.current(rec.anchorId);
@@ -361,21 +392,29 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
       const drag = activeDragRef.current;
       if (drag) {
         // ── Move the dragged anchor ──────────────────────────────────────
-        const b = boundsRef.current;
         const editCp = editPathRef.current;
         if (!editCp) return;
         const subPaths = getSubPaths(editCp);
-        const sp = subPaths[drag.record.subPathIndex];
-        const seg = sp?.segments?.[drag.record.segmentIndex];
-        if (!seg) return;
+        const primary = drag.record.members[0];
+        const primaryPath = primary ? subPaths[primary.subPathIndex] : undefined;
+        const primarySeg = primary ? primaryPath?.segments?.[primary.segmentIndex] : undefined;
+        if (!primarySeg) return;
 
         // Target = current pointer minus original grab offset (project coords).
         const target = evt.point.subtract(drag.pointerOffset);
-        const cx = b ? Math.max(b.x, Math.min(b.x + b.width, target.x)) : target.x;
-        const cy = b ? Math.max(b.y, Math.min(b.y + b.height, target.y)) : target.y;
+        const cx = target.x;
+        const cy = target.y;
+        const dx = cx - primarySeg.point.x;
+        const dy = cy - primarySeg.point.y;
 
-        seg.point = new scope.Point(cx, cy);
-        drag.record.circle.position = seg.point;
+        for (const member of drag.record.members) {
+          const memberPath = subPaths[member.subPathIndex];
+          const memberSeg = memberPath?.segments?.[member.segmentIndex];
+          if (!memberSeg) continue;
+          memberSeg.point = new scope.Point(memberSeg.point.x + dx, memberSeg.point.y + dy);
+        }
+
+        drag.record.circle.position = new scope.Point(cx, cy);
         syncGlyphToEditPath();
 
         const newPathData = editPathRef.current?.pathData ?? '';
@@ -383,11 +422,27 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
           const result = onPathChangeRef.current(newPathData);
           if (!result.accepted) {
             // Revert segment before Paper.js redraws — the handle never escapes.
-            seg.point = drag.lastValidPt.clone();
-            drag.record.circle.position = drag.lastValidPt.clone();
+            for (const snapshot of drag.lastValidPoints) {
+              const memberPath = subPaths[snapshot.subPathIndex];
+              const memberSeg = memberPath?.segments?.[snapshot.segmentIndex];
+              if (!memberSeg) continue;
+              memberSeg.point = snapshot.point.clone();
+            }
+            const revertPrimary = drag.lastValidPoints[0];
+            if (revertPrimary) {
+              drag.record.circle.position = revertPrimary.point.clone();
+            }
             syncGlyphToEditPath();
           } else {
-            drag.lastValidPt = seg.point.clone();
+            drag.lastValidPoints = drag.record.members.map((member) => {
+              const memberPath = subPaths[member.subPathIndex];
+              const memberSeg = memberPath?.segments?.[member.segmentIndex];
+              return {
+                subPathIndex: member.subPathIndex,
+                segmentIndex: member.segmentIndex,
+                point: memberSeg ? memberSeg.point.clone() : new scope.Point(cx, cy),
+              };
+            });
             lastLocalAcceptedPathRef.current = newPathData;
           }
         }
@@ -414,10 +469,20 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
     // ── Wheel: zoom centred on pointer ───────────────────────────────────────
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1 / 1.1 : 1.1;
+      // Keep shape mode zoom behavior aligned with module mode:
+      // - no zoom-in from wheel
+      // - bounded zoom-out (cannot go farther than fitted/base view)
+      if (e.deltaY < 0) return;
+      const factor = 1.1;
       const mouseView = new scope.Point(e.offsetX, e.offsetY);
       const worldBefore = scope.view.viewToProject(mouseView);
-      scope.view.zoom /= factor;
+      const nextZoom = scope.view.zoom / factor;
+      const minZoom = minZoomRef.current > 0 ? minZoomRef.current : 1e-6;
+      scope.view.zoom = Math.max(minZoom, nextZoom);
+      if (Math.abs(scope.view.zoom - minZoom) < 1e-9 && nextZoom < minZoom) {
+        // Already at zoom-out limit.
+        return;
+      }
       const worldAfter = scope.view.viewToProject(mouseView);
       scope.view.center = (scope.view.center as paper.Point).subtract(
         worldAfter.subtract(worldBefore),
@@ -465,7 +530,8 @@ export const ShapePaperCanvas: React.FC<ShapePaperCanvasProps> = ({
     prevBoundsRef.current = bounds;
     if (boundsDidChange) boundsChangedRef.current = true;
 
-    if (isLocalDragRef.current && pathData === lastLocalAcceptedPathRef.current) {
+    // Never rebuild the Paper scene during an active local drag.
+    if (isLocalDragRef.current) {
       return;
     }
     if (!themeChanged && editPathRef.current?.pathData === pathData) {

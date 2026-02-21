@@ -16,6 +16,7 @@ import {
   transitionInteraction,
 } from './interactionStateMachine';
 import { useInteractionTelemetry } from './useInteractionTelemetry';
+import { useTheme } from '../../ui/ThemeProvider';
 
 interface DesignerKonvaStageProps {
   viewBox: { x: number; y: number; width: number; height: number };
@@ -55,6 +56,8 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
   const [size, setSize] = useState({ width: 1000, height: 700 });
 
   const telemetry = useInteractionTelemetry('designer-stage');
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const interactionRef = useRef(createInteractionMachine());
   const dragRef = useRef<{
     charId: string;
@@ -110,6 +113,8 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
       height: formatDimension(getDimensionValue(dims, 'height', dimensionUnit), dimensionUnit),
     };
   }, [dimensionUnit, selectedBbox, showDimensions]);
+  const dimensionLineColor = isDark ? '#94a3b8' : '#334155';
+  const dimensionTextColor = isDark ? '#cbd5e1' : '#0f172a';
 
   const handleStartDrag = (charId: string) => {
     if (!transitionInteraction(interactionRef.current, 'dragging')) return;
@@ -186,7 +191,13 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
         }}
       >
         <Layer x={transform.x} y={transform.y} scaleX={transform.scale} scaleY={transform.scale}>
-          <Rect x={viewBox.x} y={viewBox.y} width={viewBox.width} height={viewBox.height} fill="var(--stage-bg)" />
+          <Rect
+            x={viewBox.x}
+            y={viewBox.y}
+            width={viewBox.width}
+            height={viewBox.height}
+            fill={isDark ? '#16243a' : '#ffffff'}
+          />
 
           <Group listening={false}>
             {Array.from({ length: 120 }).map((_, i) => (
@@ -245,7 +256,7 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
                   <Path
                     data={charPath.pathData}
                     fill="white"
-                    stroke={isSelected ? '#111827' : '#334155'}
+                    stroke={isSelected ? (isDark ? '#111827' : '#0f172a') : isDark ? '#334155' : '#64748b'}
                     strokeWidth={isSelected ? 3 : 2}
                     onMouseDown={(event) => {
                       event.cancelBubble = true;
@@ -303,14 +314,14 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
                   selectedBbox.x + selectedBbox.width,
                   selectedBbox.y + selectedBbox.height + 20,
                 ]}
-                stroke="#94a3b8"
+                stroke={dimensionLineColor}
                 strokeWidth={1}
               />
               <Text
                 x={selectedBbox.x + selectedBbox.width / 2 - 30}
                 y={selectedBbox.y + selectedBbox.height + 24}
                 text={selectedDimensions.width}
-                fill="#cbd5e1"
+                fill={dimensionTextColor}
                 fontSize={11}
                 width={60}
                 align="center"
@@ -322,14 +333,14 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
                   selectedBbox.x - 20,
                   selectedBbox.y + selectedBbox.height,
                 ]}
-                stroke="#94a3b8"
+                stroke={dimensionLineColor}
                 strokeWidth={1}
               />
               <Text
                 x={selectedBbox.x - 54}
                 y={selectedBbox.y + selectedBbox.height / 2 - 6}
                 text={selectedDimensions.height}
-                fill="#cbd5e1"
+                fill={dimensionTextColor}
                 fontSize={11}
                 width={34}
                 align="right"

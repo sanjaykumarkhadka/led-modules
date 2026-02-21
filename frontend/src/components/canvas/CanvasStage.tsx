@@ -149,8 +149,9 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({ onCharacterMutate }) =
   );
 
   const toAbsoluteLED = useCallback((led: ManualLED, bbox: BoundingBox) => {
-    const x = led.x != null ? led.x : bbox.x + led.u * bbox.width;
-    const y = led.y != null ? led.y : bbox.y + led.v * bbox.height;
+    const hasUv = Number.isFinite(led.u) && Number.isFinite(led.v);
+    const x = hasUv ? bbox.x + led.u * bbox.width : (led.x ?? bbox.x);
+    const y = hasUv ? bbox.y + led.v * bbox.height : (led.y ?? bbox.y);
     return {
       x,
       y,
@@ -316,8 +317,8 @@ export const CanvasStage: React.FC<CanvasStageProps> = ({ onCharacterMutate }) =
       />
 
       {showQA && qaResults.length > 0 && (
-        <div className="absolute right-3 top-3 z-50 max-w-[360px] rounded-lg border border-zinc-700 bg-zinc-900/95 p-3 text-xs text-zinc-200">
-          <div className="mb-2 text-sm font-semibold">Placement QA</div>
+        <div className="absolute right-3 top-3 z-50 max-w-[360px] rounded-lg border border-[var(--border-1)] bg-[var(--surface-panel)]/95 p-3 text-xs text-[var(--text-2)]">
+          <div className="mb-2 text-sm font-semibold text-[var(--text-1)]">Placement QA</div>
           <div className="max-h-[240px] space-y-2 overflow-auto pr-1">
             {qaResults.map((result) => (
               <div

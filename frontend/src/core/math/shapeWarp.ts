@@ -66,6 +66,81 @@ function commandArity(cmd: string) {
   }
 }
 
+function shiftAbsoluteCommandValues(cmd: string, values: number[], dx: number, dy: number) {
+  const upper = cmd.toUpperCase();
+  const isRel = cmd !== upper;
+  if (isRel || values.length === 0 || (dx === 0 && dy === 0)) return values;
+
+  const out = [...values];
+  if (upper === 'H') {
+    out[0] += dx;
+    return out;
+  }
+  if (upper === 'V') {
+    out[0] += dy;
+    return out;
+  }
+  if (upper === 'A') {
+    out[5] += dx;
+    out[6] += dy;
+    return out;
+  }
+  for (let i = 0; i < out.length; i += 2) {
+    out[i] += dx;
+    out[i + 1] += dy;
+  }
+  return out;
+}
+
+function translatePathData(pathData: string, dx: number, dy: number) {
+  if (!pathData || (!dx && !dy)) return pathData;
+  const tokens = Array.from(pathData.matchAll(TOKEN_RE)).map((m) => m[0]);
+  let idx = 0;
+  let cmd = '';
+  const out: string[] = [];
+
+  const flushValues = (command: string, values: number[]) => {
+    const shifted = shiftAbsoluteCommandValues(command, values, dx, dy);
+    out.push(command);
+    if (shifted.length > 0) {
+      out.push(
+        shifted
+          .map((n) => Number(n.toFixed(2)).toString())
+          .join(' ')
+      );
+    }
+  };
+
+  while (idx < tokens.length) {
+    const token = tokens[idx];
+    if (/^[a-zA-Z]$/.test(token)) {
+      cmd = token;
+      idx += 1;
+      if (cmd.toUpperCase() === 'Z') {
+        out.push('Z');
+        cmd = '';
+      }
+      continue;
+    }
+    if (!cmd) {
+      idx += 1;
+      continue;
+    }
+    const arity = commandArity(cmd);
+    if (arity === 0 || idx + arity - 1 >= tokens.length) {
+      idx += 1;
+      continue;
+    }
+    const values = tokens.slice(idx, idx + arity).map((t) => Number.parseFloat(t));
+    idx += arity;
+    flushValues(cmd, values);
+    if (cmd === 'M') cmd = 'L';
+    if (cmd === 'm') cmd = 'l';
+  }
+
+  return out.join(' ').replace(/\s+/g, ' ').trim();
+}
+
 export function hasPathGeometry(shape: CharacterShapeOverride | undefined | null): boolean {
   return Boolean(shape?.outerPath && shape.outerPath.trim().length > 0);
 }
@@ -320,8 +395,17 @@ export function resolveShapePath(
   fallbackBBox: { x: number; y: number; width: number; height: number }
 ): WarpedPathResult {
   if (shape && hasPathGeometry(shape)) {
-    const pathData = composeCharacterShapePath(shape);
-    const bbox = pathBBoxFromPathData(pathData) ?? shape.bbox ?? fallbackBBox;
+    const rawPathData = composeCharacterShapePath(shape);
+    const sourceBBox = shape.bbox ?? pathBBoxFromPathData(rawPathData) ?? fallbackBBox;
+    const dx = fallbackBBox.x - sourceBBox.x;
+    const dy = fallbackBBox.y - sourceBBox.y;
+    const pathData = translatePathData(rawPathData, dx, dy);
+    const bbox = {
+      x: sourceBBox.x + dx,
+      y: sourceBBox.y + dy,
+      width: sourceBBox.width,
+      height: sourceBBox.height,
+    };
     return { pathData, bbox };
   }
   if (shape?.mesh) {

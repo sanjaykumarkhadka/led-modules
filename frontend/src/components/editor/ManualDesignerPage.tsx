@@ -30,10 +30,6 @@ import {
   moveEditableAnchorPointSafe,
   type EditablePathPoint,
 } from '../../core/math/pathEditor';
-import {
-  validatePathEdit,
-  type PathEditValidationResult,
-} from '../../core/math/pathSafety';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
 
 // Path from assets/rotating-arrow-to-the-left-svgrepo-com.svg (viewBox 0 0 305.836 305.836)
@@ -90,10 +86,18 @@ const zoomViewBox = (viewBox: ViewBox, factor: number, anchor: { x: number; y: n
 interface ManualDesignerPageProps {
   projectId: string;
   charId: string;
+  mode: 'module' | 'shape';
+  onSwitchMode: (mode: 'module' | 'shape') => void;
   onBack: () => void;
 }
 
-export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectId, charId, onBack }) => {
+export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
+  projectId,
+  charId,
+  mode,
+  onSwitchMode,
+  onBack,
+}) => {
   const blocks = useProjectStore((state) => state.blocks);
   const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
@@ -107,7 +111,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const { notify } = useToast();
   const { confirm } = useConfirm();
   const editorCharId = charId;
-  const [editorMode, setEditorMode] = useState<'module' | 'shape'>('module');
+  const editorMode = mode;
 
   const [snapEnabled] = useState(false);
   const [gridSize] = useState(2);
@@ -136,9 +140,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const [groupScale, setGroupScale] = useState(1);
   const [groupAngle, setGroupAngle] = useState(0);
   const [showShapeDebug, setShowShapeDebug] = useState(false);
-  const [lastShapeValidation, setLastShapeValidation] = useState<PathEditValidationResult | null>(null);
   const groupSpacingRef = useRef(1);
-  const lastShapeBlockToastAtRef = useRef(0);
   const lastValidShapePathRef = useRef<string | null>(null);
   const shapeAnchorOriginRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const shapeAnchorOriginCharIdRef = useRef<string | null>(null);
@@ -1416,53 +1418,18 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   const handleUpdateShapePoint = useCallback(
     (pointId: string, point: { x: number; y: number }) => {
-      let blockedReason: string | undefined;
       setDraftShapeOverride((prev) => {
         const sourcePath = prev?.outerPath || renderedPath?.pathData || '';
         if (!sourcePath) return prev;
-        const bounds = shapeEditBounds ?? baseBBox ?? prev?.bbox;
-        const clampedPoint = bounds
-          ? {
-              x: clamp(point.x, bounds.x, bounds.x + bounds.width),
-              y: clamp(point.y, bounds.y, bounds.y + bounds.height),
-            }
-          : point;
-        const updated = moveEditableAnchorPointSafe(sourcePath, pointId, clampedPoint, {
-          bounds,
-          validate: validatePathEdit,
-        });
-        const immediateValidation = validatePathEdit(sourcePath, updated.pathData, bounds);
-        setLastShapeValidation(immediateValidation);
-        if (!updated.accepted) {
-          blockedReason = updated.reason;
-          return prev;
-        }
-        if (updated.warningReason === 'bbox_escape') {
-          blockedReason = 'bbox_escape';
-          return prev;
-        }
+        const updated = moveEditableAnchorPointSafe(sourcePath, pointId, point);
+        if (!updated.accepted) return prev;
         const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
         if (!nextBBox) return prev;
         lastValidShapePathRef.current = updated.pathData;
         return createPathShapeOverride(updated.pathData, nextBBox, prev?.sourceType ?? 'custom_path');
       });
-      if (blockedReason) {
-        const now = Date.now();
-        if (now - lastShapeBlockToastAtRef.current > 700) {
-          notify({
-            variant: 'error',
-            title: 'Move blocked',
-            description:
-              blockedReason === 'bbox_escape'
-                ? 'Point must stay inside the editable shape bounds.'
-                : 'This move would create an invalid shape.',
-          });
-          lastShapeBlockToastAtRef.current = now;
-        }
-        return;
-      }
     },
-    [baseBBox, notify, renderedPath?.pathData, shapeEditBounds]
+    [baseBBox, renderedPath?.pathData]
   );
 
   /**
@@ -1486,42 +1453,20 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
 
   const handleShapePathChange = useCallback(
     (newPathData: string): { accepted: boolean } => {
-      const bounds = shapeEditBounds ?? baseBBox;
-      const prevPath = lastValidShapePathRef.current ?? renderedPath?.pathData ?? '';
-      // Guard: if somehow called before the baseline is seeded, accept silently.
-      if (!prevPath || prevPath === newPathData) {
-        lastValidShapePathRef.current = newPathData;
-        return { accepted: true };
-      }
-      const validation = validatePathEdit(prevPath, newPathData, bounds ?? undefined);
-      setLastShapeValidation(validation);
-      if (!validation.ok) {
-        const now = Date.now();
-        if (now - lastShapeBlockToastAtRef.current > 700) {
-          notify({
-            variant: 'error',
-            title: 'Move blocked',
-            description: 'This move would create an invalid shape.',
-          });
-          lastShapeBlockToastAtRef.current = now;
-        }
-        return { accepted: false };
-      }
-      const nextBBox = pathBBoxFromPathData(newPathData) ?? baseBBox;
-      if (!nextBBox) return { accepted: false };
+      const nextBBox = pathBBoxFromPathData(newPathData) ?? baseBBox ?? draftShapeOverride?.bbox;
+      if (!nextBBox) return { accepted: true };
       lastValidShapePathRef.current = newPathData;
       setDraftShapeOverride((prev) =>
         createPathShapeOverride(newPathData, nextBBox, prev?.sourceType ?? 'custom_path')
       );
       return { accepted: true };
     },
-    [baseBBox, notify, renderedPath?.pathData, shapeEditBounds]
+    [baseBBox, draftShapeOverride?.bbox]
   );
 
   const handleResetShape = useCallback(() => {
     if (!baseCharPath || !baseBBox) return;
     lastValidShapePathRef.current = baseCharPath.pathData;
-    setLastShapeValidation(null);
     const resetOrigins = new Map<string, { x: number; y: number }>();
     buildEditableAnchorPoints(baseCharPath.pathData).forEach((point) => {
       resetOrigins.set(point.id, { x: point.x, y: point.y });
@@ -1552,7 +1497,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     const oldWarped = resolveShapePath(baseCharPath.pathData, persistedShape, baseBBox);
     const nextShape = normalizeShapeOverride(draftShapeOverride, baseBBox, oldWarped.pathData);
     const nextWarped = resolveShapePath(baseCharPath.pathData, nextShape, baseBBox);
-    setLastShapeValidation(null);
     const oldBBox = oldWarped.bbox;
     const newBBox = nextWarped.bbox;
     const safeW = Math.max(1e-6, newBBox.width);
@@ -1574,7 +1518,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     setCharManualLeds(editorCharId, remapped);
     setCharShapeOverride(editorCharId, nextShape);
     setIsDirty(true);
-    setEditorMode('module');
+    onSwitchMode('module');
     setSelectedShapePointId(null);
     lastValidShapePathRef.current = nextWarped.pathData;
 
@@ -1607,6 +1551,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
     editorCharId,
     getCharShapeOverride,
     notify,
+    onSwitchMode,
     projectId,
     setCharManualLeds,
     setCharShapeOverride,
@@ -1687,7 +1632,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
   const totalWatts = draftLeds.length * currentModule.wattsPerModule;
 
   return (
-    <div className="relative min-h-screen isolate bg-[#09090b] p-0 text-zinc-100 [--surface-app:#09090b] [--surface-canvas:#09090b] [--surface-panel:#111111] [--surface-elevated:#171717] [--surface-subtle:#0f0f10] [--surface-strong:#222225] [--text-1:#f4f4f5] [--text-2:#d4d4d8] [--text-3:#a1a1aa] [--text-4:#71717a] [--border-1:#27272a] [--border-2:#3f3f46] [--stage-bg:#0b0b0c] [--stage-grid-line:rgba(161,161,170,0.2)]">
+    <div className="relative min-h-screen isolate bg-[var(--surface-app)] p-0 text-[var(--text-1)]">
       <div className="relative z-10 flex h-full min-h-0">
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           <div className="h-16 shrink-0 border-b border-[var(--border-1)] bg-[var(--surface-canvas)] flex items-center justify-between px-6">
@@ -1708,7 +1653,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
               <div className="mr-2 inline-flex rounded-lg border border-[var(--border-1)] bg-[var(--surface-elevated)] p-1">
                 <button
                   type="button"
-                  onClick={() => setEditorMode('module')}
+                  onClick={() => onSwitchMode('module')}
                   className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     editorMode === 'module'
                       ? 'bg-[var(--text-1)] text-[var(--surface-app)]'
@@ -1719,7 +1664,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditorMode('shape')}
+                  onClick={() => onSwitchMode('shape')}
                   className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                     editorMode === 'shape'
                       ? 'bg-[var(--text-1)] text-[var(--surface-app)]'
@@ -2233,15 +2178,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({ projectI
                                 <span>Y</span>
                                 <span>{selectedPoint.y.toFixed(1)}</span>
                               </div>
-                              {showShapeDebug && lastShapeValidation?.severity && (
-                                <div className="flex justify-between text-[var(--text-2)]">
-                                  <span>Last check</span>
-                                  <span>
-                                    {lastShapeValidation.severity}
-                                    {lastShapeValidation.reason ? ` (${lastShapeValidation.reason})` : ''}
-                                  </span>
-                                </div>
-                              )}
                             </>
                           );
                         })()}
