@@ -24,6 +24,8 @@ import { useInteractionTelemetry } from '../../canvas/konva/useInteractionTeleme
 
 type ToolMode = 'select' | 'pan' | 'add' | 'boxSelect';
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
+type ViewBox = { x: number; y: number; width: number; height: number };
+const VIEWBOX_EPSILON = 1e-4;
 
 export interface ManualKonvaCanvasProps {
   editorMode: 'module' | 'shape';
@@ -31,14 +33,9 @@ export interface ManualKonvaCanvasProps {
   setTool: (tool: ToolMode) => void;
   isPanning: boolean;
   setIsPanning: (next: boolean) => void;
-  viewBox: { x: number; y: number; width: number; height: number };
-  setViewBox: (next: { x: number; y: number; width: number; height: number }) => void;
-  clampViewBoxToBase: (next: { x: number; y: number; width: number; height: number }) => {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
+  viewBox: ViewBox;
+  setViewBox: (next: ViewBox) => void;
+  clampViewBoxToBase: (next: ViewBox) => ViewBox;
   localBounds: { x: number; y: number; width: number; height: number };
   pathData: string;
   pathOffset: { x: number; y: number };
@@ -94,8 +91,8 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   tinyModuleLodPxThreshold = 22,
   onViewportInteractionStart,
 }) => {
-  // Flip to `false` to silence zoom diagnostics after verification.
-  const DEBUG_ZOOM = import.meta.env.DEV;
+  // Set `VITE_MANUAL_ZOOM_DEBUG=1` to enable verbose zoom diagnostics in dev.
+  const DEBUG_ZOOM = import.meta.env.DEV && import.meta.env.VITE_MANUAL_ZOOM_DEBUG === '1';
   const { theme } = useTheme();
   const telemetry = useInteractionTelemetry('manual-stage');
   const isDark = theme === 'dark';
@@ -112,10 +109,13 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
 
   const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
   const panStartRef = useRef<{
-    x: number;
-    y: number;
-    viewBox: { x: number; y: number; width: number; height: number };
+    startPointerPx: { x: number; y: number };
+    startViewBox: ViewBox;
+    startScale: number;
   } | null>(null);
+  const panPendingViewBoxRef = useRef<ViewBox | null>(null);
+  const panRafRef = useRef<number | null>(null);
+  const viewBoxRef = useRef<ViewBox>(viewBox);
   const dragRef = useRef<{
     leadId: string;
     allIds: string[];
@@ -161,10 +161,19 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   }, []);
 
   useEffect(() => {
+    viewBoxRef.current = viewBox;
+  }, [viewBox]);
+
+  useEffect(() => {
     const cancel = () => {
       marqueeStartRef.current = null;
       setMarqueeRect(null);
       panStartRef.current = null;
+      panPendingViewBoxRef.current = null;
+      if (panRafRef.current != null) {
+        cancelAnimationFrame(panRafRef.current);
+        panRafRef.current = null;
+      }
       dragRef.current = null;
       resizeRef.current = null;
       rotateSingleRef.current = null;
@@ -182,6 +191,50 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [setIsPanning]);
+
+  const isSameViewBox = useCallback((a: ViewBox, b: ViewBox) => {
+    return (
+      Math.abs(a.x - b.x) <= VIEWBOX_EPSILON &&
+      Math.abs(a.y - b.y) <= VIEWBOX_EPSILON &&
+      Math.abs(a.width - b.width) <= VIEWBOX_EPSILON &&
+      Math.abs(a.height - b.height) <= VIEWBOX_EPSILON
+    );
+  }, []);
+
+  const commitPanViewBox = useCallback(
+    (candidate: ViewBox) => {
+      const current = viewBoxRef.current;
+      if (isSameViewBox(current, candidate)) return;
+      viewBoxRef.current = candidate;
+      setViewBox(candidate);
+    },
+    [isSameViewBox, setViewBox]
+  );
+
+  const schedulePanViewBox = useCallback(
+    (candidate: ViewBox) => {
+      panPendingViewBoxRef.current = candidate;
+      if (panRafRef.current != null) return;
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = null;
+        const pending = panPendingViewBoxRef.current;
+        panPendingViewBoxRef.current = null;
+        if (!pending) return;
+        commitPanViewBox(pending);
+      });
+    },
+    [commitPanViewBox]
+  );
+
+  useEffect(() => {
+    return () => {
+      panPendingViewBoxRef.current = null;
+      if (panRafRef.current != null) {
+        cancelAnimationFrame(panRafRef.current);
+        panRafRef.current = null;
+      }
+    };
+  }, []);
 
 
   const scale = useMemo(() => {
@@ -418,10 +471,12 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
         height={size.height}
         onWheel={handleStageWheel}
         onMouseDown={(evt) => {
-          const world = getPointerWorld();
-          if (!world) return;
+          const stage = evt.target.getStage();
+          if (!stage) return;
 
           if (tool === 'add') {
+            const world = getPointerWorld();
+            if (!world) return;
             const snapped = snapPoint(world);
             const { u, v } = toManual(snapped);
             const newLed: ManualLED = { id: createLedId(), u, v, x: snapped.x, y: snapped.y, rotation: 0 };
@@ -432,6 +487,8 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           }
 
           if (tool === 'boxSelect') {
+            const world = getPointerWorld();
+            if (!world) return;
             transitionInteraction(interactionRef.current, 'selecting');
             marqueeStartRef.current = world;
             setMarqueeRect({ x: world.x, y: world.y, width: 0, height: 0 });
@@ -439,12 +496,14 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           }
 
           if (tool === 'pan') {
+            const pointer = stage.getPointerPosition();
+            if (!pointer) return;
             onViewportInteractionStart?.();
             transitionInteraction(interactionRef.current, 'panning');
             panStartRef.current = {
-              x: world.x,
-              y: world.y,
-              viewBox: { ...viewBox },
+              startPointerPx: { x: pointer.x, y: pointer.y },
+              startViewBox: { ...viewBox },
+              startScale: scale,
             };
             setIsPanning(true);
             return;
@@ -454,7 +513,25 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             setSelectedLedIds(new Set());
           }
         }}
-        onMouseMove={() => {
+        onMouseMove={(evt) => {
+          const pan = panStartRef.current;
+          if (pan) {
+            const stage = evt.target.getStage();
+            const pointer = stage?.getPointerPosition() ?? stageRef.current?.getPointerPosition();
+            if (!pointer) return;
+            const dxPx = pointer.x - pan.startPointerPx.x;
+            const dyPx = pointer.y - pan.startPointerPx.y;
+            const dxWorld = dxPx / Math.max(pan.startScale, 1e-6);
+            const dyWorld = dyPx / Math.max(pan.startScale, 1e-6);
+            const next = clampViewBoxToBase({
+              ...pan.startViewBox,
+              x: pan.startViewBox.x - dxWorld,
+              y: pan.startViewBox.y - dyWorld,
+            });
+            schedulePanViewBox(next);
+            return;
+          }
+
           const world = getPointerWorld();
           if (!world) return;
           if (marqueeStartRef.current && marqueeRect) {
@@ -466,20 +543,6 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
               width: Math.abs(world.x - sx),
               height: Math.abs(world.y - sy),
             });
-            return;
-          }
-
-          const pan = panStartRef.current;
-          if (pan) {
-            const dx = world.x - pan.x;
-            const dy = world.y - pan.y;
-            setViewBox(
-              clampViewBoxToBase({
-                ...pan.viewBox,
-                x: pan.viewBox.x - dx,
-                y: pan.viewBox.y - dy,
-              })
-            );
             return;
           }
 
@@ -625,6 +688,14 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             marqueeStartRef.current = null;
             setMarqueeRect(null);
             setTool('select');
+          }
+          if (panPendingViewBoxRef.current) {
+            commitPanViewBox(panPendingViewBoxRef.current);
+            panPendingViewBoxRef.current = null;
+          }
+          if (panRafRef.current != null) {
+            cancelAnimationFrame(panRafRef.current);
+            panRafRef.current = null;
           }
           panStartRef.current = null;
           dragRef.current = null;

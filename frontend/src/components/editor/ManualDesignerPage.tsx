@@ -139,8 +139,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   onSwitchMode,
   onBack,
 }) => {
-  // Flip to `false` to silence zoom diagnostics after verification.
-  const DEBUG_ZOOM = import.meta.env.DEV;
+  // Set `VITE_MANUAL_ZOOM_DEBUG=1` to enable verbose zoom diagnostics in dev.
+  const DEBUG_ZOOM = import.meta.env.DEV && import.meta.env.VITE_MANUAL_ZOOM_DEBUG === '1';
   const blocks = useProjectStore((state) => state.blocks);
   const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
