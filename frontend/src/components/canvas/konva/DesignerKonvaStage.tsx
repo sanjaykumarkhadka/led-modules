@@ -275,6 +275,20 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
             leds.map((led, i) => {
               const isManual = led.source === 'manual';
               const charScale = getCharVisualScale(charId);
+              const moduleStroke = isManual
+                ? isDark
+                  ? '#e2e8f0'
+                  : '#0f172a'
+                : isDark
+                  ? '#71717a'
+                  : '#475569';
+              const moduleDot = isManual
+                ? isDark
+                  ? '#cbd5e1'
+                  : '#1e293b'
+                : isDark
+                  ? '#52525b'
+                  : '#334155';
               const ledScale =
                 'scale' in led && typeof (led as { scale?: number }).scale === 'number'
                   ? (led as { scale?: number }).scale || 1
@@ -294,12 +308,12 @@ export const DesignerKonvaStage: React.FC<DesignerKonvaStageProps> = ({
                     height={height}
                     cornerRadius={height / 2}
                     fillEnabled={false}
-                    stroke={isManual ? '#e4e4e7' : '#71717a'}
+                    stroke={moduleStroke}
                     strokeWidth={0.8}
                   />
                   <Rect x={-width / 2} y={-height / 2} width={width} height={height} fill="transparent" />
-                  <Rect x={-dotOffset - dotRadius} y={-dotRadius} width={dotRadius * 2} height={dotRadius * 2} cornerRadius={dotRadius} fill="#52525b" listening={false} />
-                  <Rect x={dotOffset - dotRadius} y={-dotRadius} width={dotRadius * 2} height={dotRadius * 2} cornerRadius={dotRadius} fill="#52525b" listening={false} />
+                  <Rect x={-dotOffset - dotRadius} y={-dotRadius} width={dotRadius * 2} height={dotRadius * 2} cornerRadius={dotRadius} fill={moduleDot} listening={false} />
+                  <Rect x={dotOffset - dotRadius} y={-dotRadius} width={dotRadius * 2} height={dotRadius * 2} cornerRadius={dotRadius} fill={moduleDot} listening={false} />
                 </Group>
               );
             })

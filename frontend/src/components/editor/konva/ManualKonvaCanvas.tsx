@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Circle, Group, Layer, Line, Path, Rect, Stage } from 'react-konva';
+import { Circle, Group, Layer, Line, Path, Rect, Stage, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { ManualLED } from '../../../data/store';
 import { useTheme } from '../../ui/ThemeProvider';
@@ -360,12 +360,16 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
         height: viewBox.height * factor,
       };
       const clamped = clampViewBoxToBase(zoomed);
+      const atZoomInLimit =
+        evt.evt.deltaY < 0 &&
+        Math.abs(clamped.width - viewBox.width) < VIEWBOX_EPSILON &&
+        Math.abs(clamped.height - viewBox.height) < VIEWBOX_EPSILON;
+      const unchanged =
+        Math.abs(clamped.x - viewBox.x) < VIEWBOX_EPSILON &&
+        Math.abs(clamped.y - viewBox.y) < VIEWBOX_EPSILON &&
+        Math.abs(clamped.width - viewBox.width) < VIEWBOX_EPSILON &&
+        Math.abs(clamped.height - viewBox.height) < VIEWBOX_EPSILON;
       if (DEBUG_ZOOM) {
-        const clampedUnchanged =
-          clamped.x === viewBox.x &&
-          clamped.y === viewBox.y &&
-          clamped.width === viewBox.width &&
-          clamped.height === viewBox.height;
         console.debug('[manual-zoom]', {
           deltaY: evt.evt.deltaY,
           clientX: evt.evt.clientX,
@@ -375,12 +379,15 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           pointer,
           world,
           factor,
-          clampedUnchanged,
+          clampedUnchanged: unchanged,
+          atZoomInLimit,
           prev: viewBox,
           next: zoomed,
           clamped,
         });
       }
+      if (atZoomInLimit) return;
+      if (unchanged) return;
       setViewBox(clamped);
     },
     [DEBUG_ZOOM, clampViewBoxToBase, onViewportInteractionStart, setViewBox, toWorld, viewBox]
@@ -400,16 +407,16 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
       stageBackground: isDark ? '#111827' : '#f8fafc',
       glyphFill: isDark ? 'rgba(148,163,184,0.10)' : 'rgba(148,163,184,0.08)',
       glyphStroke: isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.50)',
-      ledStroke: isDark ? '#38bdf8' : '#0284c7',
-      ledDot: isDark ? '#38bdf8' : '#0284c7',
-      ledSelected: isDark ? '#60a5fa' : '#2563eb',
+      ledStroke: isDark ? '#38bdf8' : '#0369a1',
+      ledDot: isDark ? '#38bdf8' : '#075985',
+      ledSelected: isDark ? '#60a5fa' : '#1d4ed8',
       ledHandle: isDark ? '#60a5fa' : '#2563eb',
-      tinyStroke: isDark ? '#cbd5e1' : '#111827',
+      tinyStroke: isDark ? '#cbd5e1' : '#334155',
       tinySelectedHalo: isDark ? 'rgba(255,255,255,0.9)' : 'rgba(241,245,249,0.95)',
       invalid: '#dc2626',
-      controlStroke: isDark ? '#cbd5e1' : '#475569',
-      selectionFill: isDark ? 'rgba(96, 165, 250, 0.14)' : 'rgba(37, 99, 235, 0.12)',
-      selectionStroke: isDark ? 'rgba(96, 165, 250, 0.72)' : 'rgba(37, 99, 235, 0.72)',
+      controlStroke: isDark ? '#cbd5e1' : '#334155',
+      selectionFill: isDark ? 'rgba(96, 165, 250, 0.14)' : 'rgba(29, 78, 216, 0.14)',
+      selectionStroke: isDark ? 'rgba(96, 165, 250, 0.72)' : 'rgba(29, 78, 216, 0.72)',
     }),
     [isDark]
   );
@@ -889,6 +896,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                   };
                   telemetry('resize-start', { id: primarySelected.id, handle, edge: handle });
                 };
+                const resizeArrowStroke = isDark ? '#ffffff' : '#1e293b';
                 return (
                   <>
                     {/* Corner arrow indicators (visual only). */}
@@ -901,7 +909,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                         -primarySelected.w / 2 - edgeInset,
                         -primarySelected.h / 2 - edgeInset + arrowHalf,
                       ]}
-                      stroke="#ffffff"
+                      stroke={resizeArrowStroke}
                       strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
@@ -916,7 +924,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                         primarySelected.w / 2 + edgeInset,
                         -primarySelected.h / 2 - edgeInset + arrowHalf,
                       ]}
-                      stroke="#ffffff"
+                      stroke={resizeArrowStroke}
                       strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
@@ -931,7 +939,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                         -primarySelected.w / 2 - edgeInset,
                         primarySelected.h / 2 + edgeInset - arrowHalf,
                       ]}
-                      stroke="#ffffff"
+                      stroke={resizeArrowStroke}
                       strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
@@ -946,7 +954,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                         primarySelected.w / 2 + edgeInset,
                         primarySelected.h / 2 + edgeInset - arrowHalf,
                       ]}
-                      stroke="#ffffff"
+                      stroke={resizeArrowStroke}
                       strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
@@ -989,18 +997,14 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                   </>
                 );
               })()}
-              <Circle
-                x={0}
-                y={(() => {
-                  const rotationHandleRadius = Math.max(Math.min(primarySelected.h * 0.16, 1.1), 0.12);
-                  const rotationHandleGap = Math.max(Math.min(primarySelected.h * 0.3, 0.9), 0.08);
-                  return -primarySelected.h / 2 - rotationHandleGap - rotationHandleRadius;
-                })()}
-                radius={Math.max(Math.min(primarySelected.h * 0.16, 1.1), 0.12)}
-                stroke={colors.controlStroke}
-                strokeWidth={Math.max(Math.min(primarySelected.h * 0.06, 0.45), 0.08)}
-                fill={colors.ledHandle}
-                onMouseDown={() => {
+              {(() => {
+                const rotationHandleRadius = Math.max(Math.min(primarySelected.h * 0.16, 1.1), 0.12);
+                const rotationHandleGap = Math.max(Math.min(primarySelected.h * 0.3, 0.9), 0.08);
+                const handleY = -primarySelected.h / 2 - rotationHandleGap - rotationHandleRadius;
+                const iconColor = isDark ? '#e2e8f0' : '#1e293b';
+                const iconFontSize = Math.max(rotationHandleRadius * 1.5, 0.18);
+
+                const startRotate = () => {
                   if (!transitionInteraction(interactionRef.current, 'rotating')) return;
                   const world = getPointerWorld();
                   if (!world) return;
@@ -1013,8 +1017,28 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                     startAngleDeg: start,
                   };
                   telemetry('rotate-start', { mode: 'single' });
-                }}
-              />
+                };
+
+                return (
+                  <Group x={0} y={handleY} onMouseDown={startRotate}>
+                    <Circle
+                      radius={rotationHandleRadius}
+                      stroke={colors.controlStroke}
+                      strokeWidth={Math.max(Math.min(primarySelected.h * 0.06, 0.45), 0.08)}
+                      fill={colors.ledHandle}
+                    />
+                    <Text
+                      x={-iconFontSize * 0.32}
+                      y={-iconFontSize * 0.54}
+                      text="↻"
+                      fontSize={iconFontSize}
+                      fill={iconColor}
+                      listening={false}
+                    />
+                    <Circle radius={rotationHandleRadius * 1.25} fill="transparent" />
+                  </Group>
+                );
+              })()}
             </Group>
           )}
 
