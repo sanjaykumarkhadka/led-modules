@@ -21,6 +21,7 @@ import {
   listProjectCharacterOverrides,
   patchCharacterOverride,
 } from '../api/projectOverrides';
+import { hasFiniteUv, resolveManualLedPoint } from '../core/math/manualLedCoordinates';
 
 interface ProjectsState {
   projects: Project[];
@@ -85,12 +86,13 @@ async function hydrateProjectGraph(accessToken: string, projectId: string) {
   const manualLedOverrides: Record<string, ReturnType<typeof useProjectStore.getState>['getCharManualLeds'] extends (id: string) => infer T ? T : never> = {};
   for (const m of modules) {
     const list = manualLedOverrides[m.characterId] ?? [];
+    const hasUv = hasFiniteUv({ u: m.u ?? Number.NaN, v: m.v ?? Number.NaN });
     list.push({
       id: m.id,
       u: m.u ?? 0,
       v: m.v ?? 0,
-      ...(m.x != null ? { x: m.x } : {}),
-      ...(m.y != null ? { y: m.y } : {}),
+      ...(!hasUv && m.x != null ? { x: m.x } : {}),
+      ...(!hasUv && m.y != null ? { y: m.y } : {}),
       rotation: m.rotation,
       ...(m.scale != null ? { scale: m.scale } : {}),
     });
@@ -250,14 +252,7 @@ async function syncNormalizedGraph(accessToken: string, projectId: string) {
     const bbox = charBBoxes.get(charId);
     const withLocalCoords = modules.map((m) => ({
       ...m,
-      ...(m.x != null && m.y != null
-        ? { x: m.x, y: m.y }
-        : bbox
-          ? {
-              x: bbox.x + m.u * bbox.width,
-              y: bbox.y + m.v * bbox.height,
-            }
-          : {}),
+      ...(bbox ? resolveManualLedPoint(m, bbox) : (m.x != null && m.y != null ? { x: m.x, y: m.y } : {})),
     }));
     await replaceCharacterModules(accessToken, projectId, charId, withLocalCoords);
   }

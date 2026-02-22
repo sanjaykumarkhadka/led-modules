@@ -29,6 +29,7 @@ import {
   moveEditableAnchorPointSafe,
   type EditablePathPoint,
 } from '../../core/math/pathEditor';
+import { resolveManualLedPoint } from '../../core/math/manualLedCoordinates';
 import { commitCharacterShapeOverride } from '../../api/projectShapes';
 import type { ShapeModulePreviewLed } from './paper/ShapePaperCanvas';
 import { generateLEDPositions, estimateGridCount, createDefaultAutofillConfig } from '../../core/math/placement';
@@ -39,6 +40,7 @@ const ROTATE_ARROW_PATH =
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
 const MAX_ZOOM_IN_FACTOR = 0.05;
+const MAX_MODULES_PER_CHARACTER = 600;
 const MANUAL_EDITOR_FIT_PADDING = 0.05;
 const MANUAL_EDITOR_HEADER_HEIGHT = 64;
 const MANUAL_EDITOR_OUTER_PADDING = 16;
@@ -676,8 +678,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
           2;
       const w = BASE_LED_WIDTH * scale * charVisualScale;
       const h = BASE_LED_HEIGHT * scale * charVisualScale;
-      const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
-      const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+      const { x, y } = resolveManualLedPoint(led, localBounds);
       return {
         ...led,
         x,
@@ -1311,6 +1312,15 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       notify({ variant: 'error', title: 'Autofill failed', description: 'Character path not ready.' });
       return;
     }
+    const estimatedCount = estimateGridCount(pathEl, buildAutofillConfig());
+    if (estimatedCount > MAX_MODULES_PER_CHARACTER) {
+      notify({
+        variant: 'error',
+        title: 'Too many modules',
+        description: `Estimated modules (${estimatedCount}) exceed the maximum of ${MAX_MODULES_PER_CHARACTER}. Reduce size/density.`,
+      });
+      return;
+    }
 
     if (draftLeds.length > 0) {
       const ok = await confirm({
@@ -1325,6 +1335,14 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     setAutofillRunning(true);
     try {
       const positions = generateLEDPositions(pathEl, buildAutofillConfig());
+      if (positions.length > MAX_MODULES_PER_CHARACTER) {
+        notify({
+          variant: 'error',
+          title: 'Too many modules',
+          description: `Estimated modules must be ${MAX_MODULES_PER_CHARACTER} or fewer.`,
+        });
+        return;
+      }
 
       if (positions.length === 0) {
         notify({ variant: 'error', title: 'Autofill produced no modules', description: 'Try reducing spacing or inset.' });
@@ -1673,8 +1691,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       if (!pathEl) return failedIds;
 
       for (const led of leds) {
-        const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
-        const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+        const { x, y } = resolveManualLedPoint(led, localBounds);
         const worldX = x + pathOffset.x;
         const worldY = y + pathOffset.y;
         const rotation = led.rotation ?? 0;
@@ -1701,8 +1718,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       try {
         adapter.setPath(candidatePathData);
         for (const led of draftLeds) {
-          const x = led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
-          const y = led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+          const { x, y } = resolveManualLedPoint(led, localBounds);
           const worldX = x + pathOffset.x;
           const worldY = y + pathOffset.y;
           const rotation = led.rotation ?? 0;

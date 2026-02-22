@@ -15,6 +15,7 @@ import {
   applyRotate,
   startTransform,
 } from '../../canvas/konva/transformEngine';
+import { resolveManualLedPoint } from '../../../core/math/manualLedCoordinates';
 import {
   createInteractionMachine,
   resetInteraction,
@@ -284,10 +285,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   const absoluteLeds = useMemo(() => {
     return draftLeds.map((led) => {
       const scaleValue = led.scale ?? 1;
-      const resolvedX =
-        led.x != null ? led.x : localBounds.x + led.u * localBounds.width;
-      const resolvedY =
-        led.y != null ? led.y : localBounds.y + led.v * localBounds.height;
+      const { x: resolvedX, y: resolvedY } = resolveManualLedPoint(led, localBounds);
       return {
         ...led,
         x: resolvedX,
