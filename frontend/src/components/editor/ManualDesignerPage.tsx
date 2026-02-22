@@ -192,7 +192,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   const [autofillRunning, setAutofillRunning] = useState(false);
   const groupSpacingRef = useRef(1);
   const lastValidShapePathRef = useRef<string | null>(null);
-  const lastShapeMoveBlockedToastAtRef = useRef(0);
   const shapeAnchorOriginRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const shapeAnchorOriginCharIdRef = useRef<string | null>(null);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
@@ -1688,17 +1687,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     [getLedCapsuleHalfLength, localBounds, pathOffset.x, pathOffset.y]
   );
 
-  const notifyShapeMoveBlocked = useCallback(() => {
-    const now = Date.now();
-    if (now - lastShapeMoveBlockedToastAtRef.current < 800) return;
-    lastShapeMoveBlockedToastAtRef.current = now;
-    notify({
-      variant: 'error',
-      title: 'Move blocked',
-      description: 'This shape change would place one or more modules outside the character.',
-    });
-  }, [notify]);
-
   const areAllModulesInsidePath = useCallback(
     (candidatePathData: string): { ok: boolean; failedCount: number } => {
       if (!localBounds || !candidatePathData || draftLeds.length === 0) {
@@ -1744,18 +1732,13 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
         if (!sourcePath) return prev;
         const updated = moveEditableAnchorPointSafe(sourcePath, pointId, point);
         if (!updated.accepted) return prev;
-        const shapeInsideVerdict = areAllModulesInsidePath(updated.pathData);
-        if (!shapeInsideVerdict.ok) {
-          notifyShapeMoveBlocked();
-          return prev;
-        }
         const nextBBox = pathBBoxFromPathData(updated.pathData) ?? baseBBox ?? prev?.bbox;
         if (!nextBBox) return prev;
         lastValidShapePathRef.current = updated.pathData;
         return createPathShapeOverride(updated.pathData, nextBBox, prev?.sourceType ?? 'custom_path');
       });
     },
-    [areAllModulesInsidePath, baseBBox, notifyShapeMoveBlocked, renderedPath?.pathData]
+    [baseBBox, renderedPath?.pathData]
   );
 
   /**
@@ -1779,11 +1762,6 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const handleShapePathChange = useCallback(
     (newPathData: string): { accepted: boolean } => {
-      const shapeInsideVerdict = areAllModulesInsidePath(newPathData);
-      if (!shapeInsideVerdict.ok) {
-        notifyShapeMoveBlocked();
-        return { accepted: false };
-      }
       const nextBBox = pathBBoxFromPathData(newPathData) ?? baseBBox ?? draftShapeOverride?.bbox;
       if (!nextBBox) return { accepted: true };
       lastValidShapePathRef.current = newPathData;
@@ -1792,7 +1770,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       );
       return { accepted: true };
     },
-    [areAllModulesInsidePath, baseBBox, draftShapeOverride?.bbox, notifyShapeMoveBlocked]
+    [baseBBox, draftShapeOverride?.bbox]
   );
 
   const handleResetShape = useCallback(() => {
