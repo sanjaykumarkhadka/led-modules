@@ -740,11 +740,16 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             const minModulePx = Math.min(led.w, led.h) * scale;
             const renderTinyAsDotted = tinyModuleLodEnabled && minModulePx < tinyModuleLodPxThreshold;
             const tinyStrokeWidth = Math.max(0.95 / Math.max(scale, 1e-6), 0.22);
+            // Keep tiny modules visually identical to large ones by preserving
+            // the same relative proportions (no hard minimums that distort shape).
             const moduleStrokeWidth = isInvalid
-              ? 1.1
-              : Math.max(Math.min(led.h * 0.22, 0.85), 0.35);
-            const dotRadius = Math.max(Math.min(led.h * 0.16, 1.15), 0.45);
-            const dotOffset = led.w * 0.29;
+              ? Math.max(led.h * 0.22, 0.2)
+              : Math.max(led.h * 0.17, 0.14);
+            const dotRadius = Math.max(Math.min(led.h * 0.14, led.h * 0.32), 0.06);
+            const dotOffset = Math.min(
+              led.w * 0.29,
+              Math.max(0, led.w / 2 - dotRadius - moduleStrokeWidth * 0.5)
+            );
             const tinyDash = [
               Math.max(2.4 / Math.max(scale, 1e-6), 0.6),
               Math.max(3.0 / Math.max(scale, 1e-6), 0.8),
@@ -831,8 +836,6 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                       y={0}
                       radius={dotRadius}
                       fill={fillDot}
-                      stroke={colors.stageBackground}
-                      strokeWidth={Math.max(dotRadius * 0.16, 0.08)}
                       listening={false}
                     />
                     <Circle
@@ -840,8 +843,6 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                       y={0}
                       radius={dotRadius}
                       fill={fillDot}
-                      stroke={colors.stageBackground}
-                      strokeWidth={Math.max(dotRadius * 0.16, 0.08)}
                       listening={false}
                     />
                   </>
