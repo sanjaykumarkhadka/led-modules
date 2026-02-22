@@ -509,7 +509,9 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             return;
           }
 
-          if (evt.target === evt.target.getStage()) {
+          const inLedItem = Boolean(evt.target.findAncestor('.led-item'));
+          const inLedControls = Boolean(evt.target.findAncestor('.led-controls'));
+          if (!inLedItem && !inLedControls) {
             setSelectedLedIds(new Set());
           }
         }}
@@ -757,6 +759,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             return (
               <Group
                 key={led.id}
+                name="led-item"
                 x={led.x}
                 y={led.y}
                 rotation={led.rotation}
@@ -809,16 +812,22 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                 ) : (
                   <>
                     {selected && (
-                      <Rect
-                        x={-led.w / 2 - 0.6}
-                        y={-led.h / 2 - 0.6}
-                        width={led.w + 1.2}
-                        height={led.h + 1.2}
-                        cornerRadius={led.h / 2}
-                        stroke={colors.ledSelected}
-                        strokeWidth={0.6}
-                        fillEnabled={false}
-                      />
+                      (() => {
+                        const selPad = Math.min(Math.max(led.h * 0.16, 0.04), 0.28);
+                        const selStroke = Math.min(Math.max(led.h * 0.18, 0.08), 0.45);
+                        return (
+                          <Rect
+                            x={-led.w / 2 - selPad}
+                            y={-led.h / 2 - selPad}
+                            width={led.w + selPad * 2}
+                            height={led.h + selPad * 2}
+                            cornerRadius={led.h / 2 + selPad}
+                            stroke={colors.ledSelected}
+                            strokeWidth={selStroke}
+                            fillEnabled={false}
+                          />
+                        );
+                      })()
                     )}
                     <Rect
                       x={-led.w / 2}
@@ -852,24 +861,24 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           })}
 
           {primarySelected && (
-            <Group x={primarySelected.x} y={primarySelected.y} rotation={primarySelected.rotation}>
+            <Group
+              name="led-controls"
+              x={primarySelected.x}
+              y={primarySelected.y}
+              rotation={primarySelected.rotation}
+            >
               {(() => {
-                const arrowLen = Math.max(8 / Math.max(scale, 1e-6), 1.8);
+                const minDim = Math.max(0.1, Math.min(primarySelected.w, primarySelected.h));
+                const maxDim = Math.max(primarySelected.w, primarySelected.h);
+                const arrowLen = Math.min(Math.max(minDim * 0.9, 0.22), Math.max(0.6, maxDim * 0.55));
                 const arrowHalf = arrowLen * 0.45;
-                const edgeInset = Math.max(1.2 / Math.max(scale, 1e-6), 0.3);
-                const edgeHitWidth = Math.max(12 / Math.max(scale, 1e-6), 3);
-                const edgeHitLength = Math.max(14 / Math.max(scale, 1e-6), 4);
-                const startResizeFromEdge = (edge: 'top' | 'right' | 'bottom' | 'left') => {
+                const edgeInset = Math.min(Math.max(minDim * 0.18, 0.08), maxDim * 0.22);
+                const arrowStrokeWidth = Math.min(Math.max(minDim * 0.11, 0.08), 0.42);
+                const cornerHitRadius = Math.min(Math.max(minDim * 0.35, 0.14), maxDim * 0.4);
+                const startResizeFromHandle = (handle: ResizeHandle) => {
                   if (!transitionInteraction(interactionRef.current, 'resizing')) return;
                   const world = getPointerWorld();
                   if (!world) return;
-                  const dx = world.x - primarySelected.x;
-                  const dy = world.y - primarySelected.y;
-                  let handle: ResizeHandle = 'ne';
-                  if (edge === 'top') handle = dx < 0 ? 'nw' : 'ne';
-                  if (edge === 'bottom') handle = dx < 0 ? 'sw' : 'se';
-                  if (edge === 'left') handle = dy < 0 ? 'nw' : 'sw';
-                  if (edge === 'right') handle = dy < 0 ? 'ne' : 'se';
                   resizeRef.current = {
                     ledId: primarySelected.id,
                     handle,
@@ -880,86 +889,118 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                     startH: BASE_LED_HEIGHT * charVisualScale,
                     startRotation: primarySelected.rotation,
                   };
-                  telemetry('resize-start', { id: primarySelected.id, handle, edge });
+                  telemetry('resize-start', { id: primarySelected.id, handle, edge: handle });
                 };
                 return (
                   <>
-                    {/* Edge arrow indicators (visual only). */}
+                    {/* Corner arrow indicators (visual only). */}
                     <Line
-                      points={[0 - arrowHalf, -primarySelected.h / 2 - edgeInset, 0, -primarySelected.h / 2 - edgeInset - arrowHalf, 0 + arrowHalf, -primarySelected.h / 2 - edgeInset]}
-                      stroke={colors.controlStroke}
-                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      points={[
+                        -primarySelected.w / 2 - edgeInset + arrowHalf,
+                        -primarySelected.h / 2 - edgeInset,
+                        -primarySelected.w / 2 - edgeInset,
+                        -primarySelected.h / 2 - edgeInset,
+                        -primarySelected.w / 2 - edgeInset,
+                        -primarySelected.h / 2 - edgeInset + arrowHalf,
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
                       listening={false}
                     />
                     <Line
-                      points={[0 - arrowHalf, primarySelected.h / 2 + edgeInset, 0, primarySelected.h / 2 + edgeInset + arrowHalf, 0 + arrowHalf, primarySelected.h / 2 + edgeInset]}
-                      stroke={colors.controlStroke}
-                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      points={[
+                        primarySelected.w / 2 + edgeInset - arrowHalf,
+                        -primarySelected.h / 2 - edgeInset,
+                        primarySelected.w / 2 + edgeInset,
+                        -primarySelected.h / 2 - edgeInset,
+                        primarySelected.w / 2 + edgeInset,
+                        -primarySelected.h / 2 - edgeInset + arrowHalf,
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
                       listening={false}
                     />
                     <Line
-                      points={[-primarySelected.w / 2 - edgeInset, 0 - arrowHalf, -primarySelected.w / 2 - edgeInset - arrowHalf, 0, -primarySelected.w / 2 - edgeInset, 0 + arrowHalf]}
-                      stroke={colors.controlStroke}
-                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      points={[
+                        -primarySelected.w / 2 - edgeInset + arrowHalf,
+                        primarySelected.h / 2 + edgeInset,
+                        -primarySelected.w / 2 - edgeInset,
+                        primarySelected.h / 2 + edgeInset,
+                        -primarySelected.w / 2 - edgeInset,
+                        primarySelected.h / 2 + edgeInset - arrowHalf,
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
                       listening={false}
                     />
                     <Line
-                      points={[primarySelected.w / 2 + edgeInset, 0 - arrowHalf, primarySelected.w / 2 + edgeInset + arrowHalf, 0, primarySelected.w / 2 + edgeInset, 0 + arrowHalf]}
-                      stroke={colors.controlStroke}
-                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      points={[
+                        primarySelected.w / 2 + edgeInset - arrowHalf,
+                        primarySelected.h / 2 + edgeInset,
+                        primarySelected.w / 2 + edgeInset,
+                        primarySelected.h / 2 + edgeInset,
+                        primarySelected.w / 2 + edgeInset,
+                        primarySelected.h / 2 + edgeInset - arrowHalf,
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={arrowStrokeWidth}
                       lineCap="round"
                       lineJoin="round"
                       listening={false}
                     />
 
-                    {/* Edge-only resize hit targets. */}
+                    {/* Corner-only resize hit targets. */}
                     <Rect
-                      x={-edgeHitLength / 2}
-                      y={-primarySelected.h / 2 - edgeInset - edgeHitWidth}
-                      width={edgeHitLength}
-                      height={edgeHitWidth * 2}
+                      x={-primarySelected.w / 2 - edgeInset - cornerHitRadius}
+                      y={-primarySelected.h / 2 - edgeInset - cornerHitRadius}
+                      width={cornerHitRadius * 2}
+                      height={cornerHitRadius * 2}
                       fill="transparent"
-                      onMouseDown={() => startResizeFromEdge('top')}
+                      onMouseDown={() => startResizeFromHandle('nw')}
                     />
                     <Rect
-                      x={-edgeHitLength / 2}
-                      y={primarySelected.h / 2 + edgeInset - edgeHitWidth}
-                      width={edgeHitLength}
-                      height={edgeHitWidth * 2}
+                      x={primarySelected.w / 2 + edgeInset - cornerHitRadius}
+                      y={-primarySelected.h / 2 - edgeInset - cornerHitRadius}
+                      width={cornerHitRadius * 2}
+                      height={cornerHitRadius * 2}
                       fill="transparent"
-                      onMouseDown={() => startResizeFromEdge('bottom')}
+                      onMouseDown={() => startResizeFromHandle('ne')}
                     />
                     <Rect
-                      x={-primarySelected.w / 2 - edgeInset - edgeHitWidth}
-                      y={-edgeHitLength / 2}
-                      width={edgeHitWidth * 2}
-                      height={edgeHitLength}
+                      x={-primarySelected.w / 2 - edgeInset - cornerHitRadius}
+                      y={primarySelected.h / 2 + edgeInset - cornerHitRadius}
+                      width={cornerHitRadius * 2}
+                      height={cornerHitRadius * 2}
                       fill="transparent"
-                      onMouseDown={() => startResizeFromEdge('left')}
+                      onMouseDown={() => startResizeFromHandle('sw')}
                     />
                     <Rect
-                      x={primarySelected.w / 2 + edgeInset - edgeHitWidth}
-                      y={-edgeHitLength / 2}
-                      width={edgeHitWidth * 2}
-                      height={edgeHitLength}
+                      x={primarySelected.w / 2 + edgeInset - cornerHitRadius}
+                      y={primarySelected.h / 2 + edgeInset - cornerHitRadius}
+                      width={cornerHitRadius * 2}
+                      height={cornerHitRadius * 2}
                       fill="transparent"
-                      onMouseDown={() => startResizeFromEdge('right')}
+                      onMouseDown={() => startResizeFromHandle('se')}
                     />
                   </>
                 );
               })()}
               <Circle
                 x={0}
-                y={-primarySelected.h / 2 - Math.max(3, Math.min(5, primarySelected.w * 0.25))}
-                radius={1.8}
+                y={(() => {
+                  const rotationHandleRadius = Math.max(Math.min(primarySelected.h * 0.16, 1.1), 0.12);
+                  const rotationHandleGap = Math.max(Math.min(primarySelected.h * 0.3, 0.9), 0.08);
+                  return -primarySelected.h / 2 - rotationHandleGap - rotationHandleRadius;
+                })()}
+                radius={Math.max(Math.min(primarySelected.h * 0.16, 1.1), 0.12)}
                 stroke={colors.controlStroke}
-                strokeWidth={0.8}
+                strokeWidth={Math.max(Math.min(primarySelected.h * 0.06, 0.45), 0.08)}
                 fill={colors.ledHandle}
                 onMouseDown={() => {
                   if (!transitionInteraction(interactionRef.current, 'rotating')) return;
@@ -981,6 +1022,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
 
           {groupCenter && (
             <Circle
+              name="led-controls"
               x={groupCenter.x}
               y={groupCenter.y - 8}
               radius={2.2}
