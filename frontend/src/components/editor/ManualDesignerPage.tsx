@@ -38,7 +38,7 @@ const ROTATE_ARROW_PATH =
   'M152.924,300.748c84.319,0,152.912-68.6,152.912-152.918c0-39.476-15.312-77.231-42.346-105.564 c0,0,3.938-8.857,8.814-19.783c4.864-10.926-2.138-18.636-15.648-17.228l-79.125,8.289c-13.511,1.411-17.999,11.467-10.021,22.461 l46.741,64.393c7.986,10.992,17.834,12.31,22.008,2.937l7.56-16.964c12.172,18.012,18.976,39.329,18.976,61.459 c0,60.594-49.288,109.875-109.87,109.875c-60.591,0-109.882-49.287-109.882-109.875c0-19.086,4.96-37.878,14.357-54.337 c5.891-10.325,2.3-23.467-8.025-29.357c-10.328-5.896-23.464-2.3-29.36,8.031C6.923,95.107,0,121.27,0,147.829 C0,232.148,68.602,300.748,152.924,300.748z';
 const ROTATE_ARROW_VIEWBOX_CENTER = 152.918;
 const ROTATE_ARROW_VIEWBOX_SIZE = 305.836;
-const MAX_ZOOM_IN_FACTOR = 0.5;
+const MAX_ZOOM_IN_FACTOR = 0.05;
 const MANUAL_EDITOR_FIT_PADDING = 0.05;
 const MANUAL_EDITOR_HEADER_HEIGHT = 64;
 const MANUAL_EDITOR_OUTER_PADDING = 16;
@@ -139,6 +139,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   onSwitchMode,
   onBack,
 }) => {
+  // Flip to `false` to silence zoom diagnostics after verification.
+  const DEBUG_ZOOM = import.meta.env.DEV;
   const blocks = useProjectStore((state) => state.blocks);
   const charactersByBlock = useProjectStore((state) => state.charactersByBlock);
   const getCharManualLeds = useProjectStore((state) => state.getCharManualLeds);
@@ -195,6 +197,9 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   const shapeAnchorOriginCharIdRef = useRef<string | null>(null);
   const selectedLedIdsRef = useRef<Set<string>>(new Set());
   const seededViewportCharIdRef = useRef<string | null>(null);
+  const moduleFitSignatureRef = useRef<string | null>(null);
+  const userViewportInteractionRef = useRef(false);
+  const warnedRefitDuringInteractionRef = useRef(false);
   useEffect(() => {
     selectedLedIdsRef.current = selectedLedIds;
   }, [selectedLedIds]);
@@ -265,6 +270,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
         )
   );
   const [moduleHostSize, setModuleHostSize] = useState({ width: 0, height: 0 });
+  const prevViewBoxRef = useRef<ViewBox | null>(null);
 
   const neededLanguages = useMemo(() => [...new Set(blocks.map((b) => b.language))], [blocks]);
   const { fonts, loading } = useFonts(neededLanguages);
@@ -454,11 +460,22 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   useEffect(() => {
     seededViewportCharIdRef.current = null;
+    moduleFitSignatureRef.current = null;
+    userViewportInteractionRef.current = false;
+    warnedRefitDuringInteractionRef.current = false;
     setFixedLocalBounds(null);
     setBaseViewBox(null);
     setViewBox(null);
     setShapeSessionFrame(null);
   }, [editorCharId]);
+
+  useEffect(() => {
+    if (editorMode !== 'module') {
+      moduleFitSignatureRef.current = null;
+      userViewportInteractionRef.current = false;
+      warnedRefitDuringInteractionRef.current = false;
+    }
+  }, [editorMode]);
 
   useEffect(() => {
     if (editorMode !== 'shape') {
@@ -487,6 +504,26 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
     const source = bbox ?? pathBounds;
     if (!source || !editorCharId) return;
     if (moduleHostSize.width <= 1 || moduleHostSize.height <= 1) return;
+    const fitSignature = [
+      editorCharId,
+      Math.round(source.x * 1000),
+      Math.round(source.y * 1000),
+      Math.round(source.width * 1000),
+      Math.round(source.height * 1000),
+      moduleHostSize.width,
+      moduleHostSize.height,
+    ].join('|');
+    if (moduleFitSignatureRef.current === fitSignature) return;
+    if (userViewportInteractionRef.current) {
+      if (DEBUG_ZOOM && !warnedRefitDuringInteractionRef.current) {
+        warnedRefitDuringInteractionRef.current = true;
+        console.warn('[manual-zoom] skipped refit during active viewport interaction', {
+          fitSignature,
+          prevSignature: moduleFitSignatureRef.current,
+        });
+      }
+      return;
+    }
 
     const local = { x: 0, y: 0, width: source.width, height: source.height };
     const base = fitViewBoxToContainer(
@@ -496,12 +533,21 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       MANUAL_EDITOR_FIT_PADDING
     );
     seededViewportCharIdRef.current = editorCharId;
+    moduleFitSignatureRef.current = fitSignature;
+    warnedRefitDuringInteractionRef.current = false;
+    if (DEBUG_ZOOM) {
+      console.debug('[manual-zoom] applying module refit', {
+        fitSignature,
+        local,
+        base,
+      });
+    }
     queueMicrotask(() => {
       setFixedLocalBounds(local);
       setBaseViewBox(base);
       setViewBox(base);
     });
-  }, [bbox, editorCharId, editorMode, moduleHostSize.height, moduleHostSize.width, pathBounds]);
+  }, [DEBUG_ZOOM, bbox, editorCharId, editorMode, moduleHostSize.height, moduleHostSize.width, pathBounds]);
 
   const clampViewBoxToBase = useCallback(
     (next: ViewBox) => {
@@ -525,12 +571,28 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
   );
 
   useEffect(() => {
+    if (!DEBUG_ZOOM || editorMode !== 'module') return;
+    if (!viewBox) return;
+    const prev = prevViewBoxRef.current;
+    console.debug('[manual-zoom:viewBox-change]', {
+      prev,
+      next: viewBox,
+      interactionActive: userViewportInteractionRef.current,
+      fitSignature: moduleFitSignatureRef.current,
+      hostSize: moduleHostSize,
+      bbox,
+      pathBounds,
+    });
+    prevViewBoxRef.current = viewBox;
+  }, [DEBUG_ZOOM, bbox, editorMode, moduleHostSize, pathBounds, viewBox]);
+
+  useEffect(() => {
+    if (USE_KONVA_MANUAL_EDITOR) return;
+    if (editorMode !== 'module') return;
     const container = canvasContainerRef.current;
     if (!container || !viewBox) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      // Manual editor allows zooming out only.
-      if (e.deltaY < 0) return;
       const svg = svgRef.current;
       if (!svg) return;
       const pt = svg.createSVGPoint();
@@ -540,13 +602,13 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
       if (!ctm) return;
       const transformed = pt.matrixTransform(ctm.inverse());
       const point = { x: transformed.x, y: transformed.y };
-      const factor = 1.03;
+      const factor = e.deltaY > 0 ? 1.03 : 0.97;
       const next = zoomViewBox(viewBox, factor, point);
       setViewBox(clampViewBoxToBase(next));
     };
     container.addEventListener('wheel', handler, { passive: false });
     return () => container.removeEventListener('wheel', handler);
-  }, [viewBox, clampViewBoxToBase]);
+  }, [editorMode, viewBox, clampViewBoxToBase]);
 
   const canonicalFrame = useMemo(() => bbox ?? pathBounds ?? null, [bbox, pathBounds]);
 
@@ -1183,6 +1245,8 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const handleFit = useCallback(() => {
     if (!baseViewBox) return;
+    userViewportInteractionRef.current = false;
+    warnedRefitDuringInteractionRef.current = false;
     setViewBox(baseViewBox);
   }, [baseViewBox]);
 
@@ -1234,7 +1298,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const buildAutofillConfig = useCallback(() => {
     const cfg = createDefaultAutofillConfig();
-    cfg.scale = autofillModuleScale;
+    cfg.scale = clamp(autofillModuleScale, MIN_LED_SCALE, MAX_LED_SCALE);
     cfg.spacing = autofillSpacing;
     cfg.orientation = autofillOrientation;
     cfg.inset = autofillInset;
@@ -1372,7 +1436,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
 
   const GROUP_SPACING_MIN = 0.5;
   const GROUP_SPACING_MAX = 1.2;
-  const GROUP_SCALE_MIN = 0.5;
+  const GROUP_SCALE_MIN = MIN_LED_SCALE;
   const GROUP_SCALE_MAX = MAX_LED_SCALE;
   const GROUP_ANGLE_MIN = 0;
   const GROUP_ANGLE_MAX = 360;
@@ -2077,6 +2141,9 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                       snapEnabled={snapEnabled}
                       gridSize={gridSize}
                       setIsDirty={setIsDirty}
+                      onViewportInteractionStart={() => {
+                        userViewportInteractionRef.current = true;
+                      }}
                       shapePoints={[]}
                       selectedShapePointId={selectedShapePointId}
                       onSelectShapePoint={setSelectedShapePointId}
@@ -2514,7 +2581,7 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
                       </div>
                       <input
                         type="range"
-                        min={0.5}
+                        min={MIN_LED_SCALE}
                         max={2.0}
                         step={0.05}
                         value={autofillModuleScale}
@@ -2701,6 +2768,47 @@ export const ManualDesignerPage: React.FC<ManualDesignerPageProps> = ({
         role="toolbar"
       >
         <div className="flex flex-col items-center gap-0.5">
+          <button
+            type="button"
+            title="Select mode — select and drag modules"
+            onClick={() => setTool('select')}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'select' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 3l11 11-5 1 1 5-2 1-2-5-5 1z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            title="Explore mode — pan around the canvas"
+            onClick={() => setTool('pan')}
+            className={`p-2.5 rounded-xl transition-colors ${tool === 'pan' ? 'bg-[var(--text-1)] text-[var(--surface-app)]' : 'text-[var(--text-3)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text-1)]'}`}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M6 11v-1a2 2 0 1 1 4 0v1" />
+              <path d="M10 10V7a2 2 0 1 1 4 0v5" />
+              <path d="M14 12v-2a2 2 0 1 1 4 0v4" />
+              <path d="M6 12v6a3 3 0 0 0 3 3h5.2a3 3 0 0 0 2.7-1.7L20 13" />
+            </svg>
+          </button>
           <button
             type="button"
             title="Box select — drag on canvas to select all modules in the box"

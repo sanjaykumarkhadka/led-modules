@@ -8,7 +8,6 @@ import {
   BASE_LED_HEIGHT,
   BASE_LED_WIDTH,
   MAX_LED_SCALE,
-  MAX_ZOOM_IN_FACTOR,
   MIN_LED_SCALE,
 } from '../../canvas/konva/editorPolicies';
 import {
@@ -59,6 +58,9 @@ export interface ManualKonvaCanvasProps {
   onUpdateShapePoint?: (id: string, point: { x: number; y: number }) => void;
   showShapeDebug?: boolean;
   anchorDebugCountById?: Record<string, number>;
+  tinyModuleLodEnabled?: boolean;
+  tinyModuleLodPxThreshold?: number;
+  onViewportInteractionStart?: () => void;
 }
 
 function createLedId() {
@@ -88,7 +90,12 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
   snapEnabled,
   gridSize,
   setIsDirty,
+  tinyModuleLodEnabled = true,
+  tinyModuleLodPxThreshold = 22,
+  onViewportInteractionStart,
 }) => {
+  // Flip to `false` to silence zoom diagnostics after verification.
+  const DEBUG_ZOOM = import.meta.env.DEV;
   const { theme } = useTheme();
   const telemetry = useInteractionTelemetry('manual-stage');
   const isDark = theme === 'dark';
@@ -281,29 +288,52 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
     };
   }, [absoluteLeds, selectedLedIds]);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      // Manual editor allows zooming out only.
-      if (e.deltaY < 0) return;
-      const world = getPointerWorld();
-      if (!world) return;
-      const factor = e.deltaY > 0 ? 1.03 : 0.97;
-      const minWidth = viewBox.width * MAX_ZOOM_IN_FACTOR;
-      const minHeight = viewBox.height * MAX_ZOOM_IN_FACTOR;
+  const handleStageWheel = useCallback(
+    (evt: Konva.KonvaEventObject<WheelEvent>) => {
+      evt.evt.preventDefault();
+      const stage = evt.target.getStage();
+      if (!stage) return;
+      const container = stage.container();
+      const rect = container.getBoundingClientRect();
+      const pointer = {
+        x: evt.evt.clientX - rect.left,
+        y: evt.evt.clientY - rect.top,
+      };
+      onViewportInteractionStart?.();
+      const world = toWorld(pointer);
+      const factor = evt.evt.deltaY > 0 ? 1.03 : 0.97;
       const zoomed = {
         x: world.x - (world.x - viewBox.x) * factor,
         y: world.y - (world.y - viewBox.y) * factor,
-        width: Math.max(minWidth, viewBox.width * factor),
-        height: Math.max(minHeight, viewBox.height * factor),
+        width: viewBox.width * factor,
+        height: viewBox.height * factor,
       };
-      setViewBox(clampViewBoxToBase(zoomed));
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [clampViewBoxToBase, getPointerWorld, setViewBox, viewBox]);
+      const clamped = clampViewBoxToBase(zoomed);
+      if (DEBUG_ZOOM) {
+        const clampedUnchanged =
+          clamped.x === viewBox.x &&
+          clamped.y === viewBox.y &&
+          clamped.width === viewBox.width &&
+          clamped.height === viewBox.height;
+        console.debug('[manual-zoom]', {
+          deltaY: evt.evt.deltaY,
+          clientX: evt.evt.clientX,
+          clientY: evt.evt.clientY,
+          rectLeft: rect.left,
+          rectTop: rect.top,
+          pointer,
+          world,
+          factor,
+          clampedUnchanged,
+          prev: viewBox,
+          next: zoomed,
+          clamped,
+        });
+      }
+      setViewBox(clamped);
+    },
+    [DEBUG_ZOOM, clampViewBoxToBase, onViewportInteractionStart, setViewBox, toWorld, viewBox]
+  );
 
   const stageClassName = useMemo(() => {
     if (tool === 'pan' && isPanning) return 'cursor-grabbing';
@@ -320,8 +350,11 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
       glyphFill: isDark ? 'rgba(148,163,184,0.10)' : 'rgba(148,163,184,0.08)',
       glyphStroke: isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.50)',
       ledStroke: isDark ? '#38bdf8' : '#0284c7',
+      ledDot: isDark ? '#38bdf8' : '#0284c7',
       ledSelected: isDark ? '#60a5fa' : '#2563eb',
       ledHandle: isDark ? '#60a5fa' : '#2563eb',
+      tinyStroke: isDark ? '#cbd5e1' : '#111827',
+      tinySelectedHalo: isDark ? 'rgba(255,255,255,0.9)' : 'rgba(241,245,249,0.95)',
       invalid: '#dc2626',
       controlStroke: isDark ? '#cbd5e1' : '#475569',
       selectionFill: isDark ? 'rgba(96, 165, 250, 0.14)' : 'rgba(37, 99, 235, 0.12)',
@@ -383,6 +416,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
         }}
         width={size.width}
         height={size.height}
+        onWheel={handleStageWheel}
         onMouseDown={(evt) => {
           const world = getPointerWorld();
           if (!world) return;
@@ -405,6 +439,7 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
           }
 
           if (tool === 'pan') {
+            onViewportInteractionStart?.();
             transitionInteraction(interactionRef.current, 'panning');
             panStartRef.current = {
               x: world.x,
@@ -630,7 +665,19 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
             const selected = selectedLedIds.has(led.id);
             const isInvalid = invalidLedIds.has(led.id);
             const stroke = isInvalid ? colors.invalid : colors.ledStroke;
-            const fillDot = isInvalid ? colors.invalid : colors.ledStroke;
+            const fillDot = isInvalid ? colors.invalid : colors.ledDot;
+            const minModulePx = Math.min(led.w, led.h) * scale;
+            const renderTinyAsDotted = tinyModuleLodEnabled && minModulePx < tinyModuleLodPxThreshold;
+            const tinyStrokeWidth = Math.max(0.95 / Math.max(scale, 1e-6), 0.22);
+            const moduleStrokeWidth = isInvalid
+              ? 1.1
+              : Math.max(Math.min(led.h * 0.22, 0.85), 0.35);
+            const dotRadius = Math.max(Math.min(led.h * 0.16, 1.15), 0.45);
+            const dotOffset = led.w * 0.29;
+            const tinyDash = [
+              Math.max(2.4 / Math.max(scale, 1e-6), 0.6),
+              Math.max(3.0 / Math.max(scale, 1e-6), 0.8),
+            ];
             return (
               <Group
                 key={led.id}
@@ -662,73 +709,179 @@ export const ManualKonvaCanvas: React.FC<ManualKonvaCanvasProps> = ({
                   telemetry('drag-start', { count: ids.length });
                 }}
               >
-                {selected && (
-                  <Rect
-                    x={-led.w / 2 - 0.6}
-                    y={-led.h / 2 - 0.6}
-                    width={led.w + 1.2}
-                    height={led.h + 1.2}
-                    cornerRadius={led.h / 2}
-                    stroke={colors.ledSelected}
-                    strokeWidth={0.6}
-                    fillEnabled={false}
-                  />
+                {renderTinyAsDotted ? (
+                  <>
+                    {selected && (
+                      <Line
+                        points={[-led.w / 2, 0, led.w / 2, 0]}
+                        stroke={colors.tinySelectedHalo}
+                        strokeWidth={tinyStrokeWidth * 2.5}
+                        lineCap="round"
+                        listening={false}
+                      />
+                    )}
+                    <Line
+                      points={[-led.w / 2, 0, led.w / 2, 0]}
+                      stroke={isInvalid ? colors.invalid : colors.tinyStroke}
+                      strokeWidth={tinyStrokeWidth}
+                      dash={tinyDash}
+                      lineCap="round"
+                      listening={false}
+                    />
+                    <Rect x={-led.w / 2} y={-Math.max(led.h / 2, 1.2)} width={led.w} height={Math.max(led.h, 2.4)} fill="transparent" />
+                  </>
+                ) : (
+                  <>
+                    {selected && (
+                      <Rect
+                        x={-led.w / 2 - 0.6}
+                        y={-led.h / 2 - 0.6}
+                        width={led.w + 1.2}
+                        height={led.h + 1.2}
+                        cornerRadius={led.h / 2}
+                        stroke={colors.ledSelected}
+                        strokeWidth={0.6}
+                        fillEnabled={false}
+                      />
+                    )}
+                    <Rect
+                      x={-led.w / 2}
+                      y={-led.h / 2}
+                      width={led.w}
+                      height={led.h}
+                      cornerRadius={led.h / 2}
+                      stroke={stroke}
+                      strokeWidth={moduleStrokeWidth}
+                      fillEnabled={false}
+                    />
+                    <Rect x={-led.w / 2} y={-led.h / 2} width={led.w} height={led.h} fill="transparent" />
+                    <Circle
+                      x={-dotOffset}
+                      y={0}
+                      radius={dotRadius}
+                      fill={fillDot}
+                      stroke={colors.stageBackground}
+                      strokeWidth={Math.max(dotRadius * 0.16, 0.08)}
+                      listening={false}
+                    />
+                    <Circle
+                      x={dotOffset}
+                      y={0}
+                      radius={dotRadius}
+                      fill={fillDot}
+                      stroke={colors.stageBackground}
+                      strokeWidth={Math.max(dotRadius * 0.16, 0.08)}
+                      listening={false}
+                    />
+                  </>
                 )}
-                <Rect
-                  x={-led.w / 2}
-                  y={-led.h / 2}
-                  width={led.w}
-                  height={led.h}
-                  cornerRadius={led.h / 2}
-                  stroke={stroke}
-                  strokeWidth={isInvalid ? 1.1 : 0.85}
-                  fillEnabled={false}
-                />
-                <Rect x={-led.w / 2} y={-led.h / 2} width={led.w} height={led.h} fill="transparent" />
-                <Circle x={-led.w * 0.29} y={0} radius={0.7} fill={fillDot} listening={false} />
-                <Circle x={led.w * 0.29} y={0} radius={0.7} fill={fillDot} listening={false} />
               </Group>
             );
           })}
 
           {primarySelected && (
             <Group x={primarySelected.x} y={primarySelected.y} rotation={primarySelected.rotation}>
-              {(['nw', 'ne', 'sw', 'se'] as const).map((handle) => {
-                const hx =
-                  handle === 'nw' || handle === 'sw'
-                    ? -primarySelected.w / 2 - 2
-                    : primarySelected.w / 2 - 2;
-                const hy =
-                  handle === 'nw' || handle === 'ne'
-                    ? -primarySelected.h / 2 - 2
-                    : primarySelected.h / 2 - 2;
+              {(() => {
+                const arrowLen = Math.max(8 / Math.max(scale, 1e-6), 1.8);
+                const arrowHalf = arrowLen * 0.45;
+                const edgeInset = Math.max(1.2 / Math.max(scale, 1e-6), 0.3);
+                const edgeHitWidth = Math.max(12 / Math.max(scale, 1e-6), 3);
+                const edgeHitLength = Math.max(14 / Math.max(scale, 1e-6), 4);
+                const startResizeFromEdge = (edge: 'top' | 'right' | 'bottom' | 'left') => {
+                  if (!transitionInteraction(interactionRef.current, 'resizing')) return;
+                  const world = getPointerWorld();
+                  if (!world) return;
+                  const dx = world.x - primarySelected.x;
+                  const dy = world.y - primarySelected.y;
+                  let handle: ResizeHandle = 'ne';
+                  if (edge === 'top') handle = dx < 0 ? 'nw' : 'ne';
+                  if (edge === 'bottom') handle = dx < 0 ? 'sw' : 'se';
+                  if (edge === 'left') handle = dy < 0 ? 'nw' : 'sw';
+                  if (edge === 'right') handle = dy < 0 ? 'ne' : 'se';
+                  resizeRef.current = {
+                    ledId: primarySelected.id,
+                    handle,
+                    session: startTransform(world),
+                    startScale: primarySelected.scaleValue,
+                    startCenter: { x: primarySelected.x, y: primarySelected.y },
+                    startW: BASE_LED_WIDTH * charVisualScale,
+                    startH: BASE_LED_HEIGHT * charVisualScale,
+                    startRotation: primarySelected.rotation,
+                  };
+                  telemetry('resize-start', { id: primarySelected.id, handle, edge });
+                };
                 return (
-                  <Rect
-                    key={handle}
-                    x={hx}
-                    y={hy}
-                    width={4}
-                    height={4}
-                    fill={colors.ledHandle}
-                    onMouseDown={() => {
-                      if (!transitionInteraction(interactionRef.current, 'resizing')) return;
-                      const world = getPointerWorld();
-                      if (!world) return;
-                      resizeRef.current = {
-                        ledId: primarySelected.id,
-                        handle,
-                        session: startTransform(world),
-                        startScale: primarySelected.scaleValue,
-                        startCenter: { x: primarySelected.x, y: primarySelected.y },
-                        startW: BASE_LED_WIDTH * charVisualScale,
-                        startH: BASE_LED_HEIGHT * charVisualScale,
-                        startRotation: primarySelected.rotation,
-                      };
-                      telemetry('resize-start', { id: primarySelected.id, handle });
-                    }}
-                  />
+                  <>
+                    {/* Edge arrow indicators (visual only). */}
+                    <Line
+                      points={[0 - arrowHalf, -primarySelected.h / 2 - edgeInset, 0, -primarySelected.h / 2 - edgeInset - arrowHalf, 0 + arrowHalf, -primarySelected.h / 2 - edgeInset]}
+                      stroke={colors.controlStroke}
+                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      lineCap="round"
+                      lineJoin="round"
+                      listening={false}
+                    />
+                    <Line
+                      points={[0 - arrowHalf, primarySelected.h / 2 + edgeInset, 0, primarySelected.h / 2 + edgeInset + arrowHalf, 0 + arrowHalf, primarySelected.h / 2 + edgeInset]}
+                      stroke={colors.controlStroke}
+                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      lineCap="round"
+                      lineJoin="round"
+                      listening={false}
+                    />
+                    <Line
+                      points={[-primarySelected.w / 2 - edgeInset, 0 - arrowHalf, -primarySelected.w / 2 - edgeInset - arrowHalf, 0, -primarySelected.w / 2 - edgeInset, 0 + arrowHalf]}
+                      stroke={colors.controlStroke}
+                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      lineCap="round"
+                      lineJoin="round"
+                      listening={false}
+                    />
+                    <Line
+                      points={[primarySelected.w / 2 + edgeInset, 0 - arrowHalf, primarySelected.w / 2 + edgeInset + arrowHalf, 0, primarySelected.w / 2 + edgeInset, 0 + arrowHalf]}
+                      stroke={colors.controlStroke}
+                      strokeWidth={Math.max(0.7 / Math.max(scale, 1e-6), 0.2)}
+                      lineCap="round"
+                      lineJoin="round"
+                      listening={false}
+                    />
+
+                    {/* Edge-only resize hit targets. */}
+                    <Rect
+                      x={-edgeHitLength / 2}
+                      y={-primarySelected.h / 2 - edgeInset - edgeHitWidth}
+                      width={edgeHitLength}
+                      height={edgeHitWidth * 2}
+                      fill="transparent"
+                      onMouseDown={() => startResizeFromEdge('top')}
+                    />
+                    <Rect
+                      x={-edgeHitLength / 2}
+                      y={primarySelected.h / 2 + edgeInset - edgeHitWidth}
+                      width={edgeHitLength}
+                      height={edgeHitWidth * 2}
+                      fill="transparent"
+                      onMouseDown={() => startResizeFromEdge('bottom')}
+                    />
+                    <Rect
+                      x={-primarySelected.w / 2 - edgeInset - edgeHitWidth}
+                      y={-edgeHitLength / 2}
+                      width={edgeHitWidth * 2}
+                      height={edgeHitLength}
+                      fill="transparent"
+                      onMouseDown={() => startResizeFromEdge('left')}
+                    />
+                    <Rect
+                      x={primarySelected.w / 2 + edgeInset - edgeHitWidth}
+                      y={-edgeHitLength / 2}
+                      width={edgeHitWidth * 2}
+                      height={edgeHitLength}
+                      fill="transparent"
+                      onMouseDown={() => startResizeFromEdge('right')}
+                    />
+                  </>
                 );
-              })}
+              })()}
               <Circle
                 x={0}
                 y={-primarySelected.h / 2 - Math.max(3, Math.min(5, primarySelected.w * 0.25))}
